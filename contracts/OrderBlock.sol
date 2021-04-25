@@ -138,11 +138,14 @@ contract OrderBlock
         //verify user input
         Market storage market = markets[_marketId];
         require(_marketId < marketId && marketId != 0, "INVALID_MARKET_ID");
-        require(_amount >= 10 ** 9, "INVALID_AMOUNT");
         require(uint8(_type) < 3, "INVALID_TYPE");
+        require(uint8(_side) < 2, "INVALID_SIDE");
+
+        //verify amount
+        require(_amount >= 10 ** 9 && _amount % 10 ** 9 == 0, "INVALID_AMOUNT");
 
         //verify price
-        require(_price >= 10 ** 9, "INVALID_PRICE");
+        require(_price >= 10 ** 9 && _price % 10 ** 9 == 0, "INVALID_PRICE");
         if (_type != orderType.MARKET) {
             uint nearestBuyLimit = getNearestLimit(_marketId, orderSide.BUY);
             uint nearestSellLimit = getNearestLimit(_marketId, orderSide.SELL);
@@ -240,14 +243,12 @@ contract OrderBlock
                 data.prices[i] = orders[marketOrders[i]].price;
                 data.amounts[i] = orders[marketOrders[i]].amount;
             }
+            data.bestPriceOpposite = getNearestLimit(data.marketId, data.side);
 
             if (!_isFillable(data)) revert("NOT ENOUGH ORDERS TO FILL THE ORDER");
 
             data.bestPrice = _marketOrder(data, marketOrdersStorage);
-            //execute stop orders
-            data.bestPriceOpposite = getNearestLimit(data.marketId, data.side);
             _executeStopOrders(data, marketOrdersStorage);
-
             _ordersPop(marketOrders, marketOrdersStorage);
         }
 
@@ -301,7 +302,8 @@ contract OrderBlock
         uint totalAmountConverted;
         for (uint i = 0; i < data.marketOrders.length; i++) {
             if (data.marketOrders[i] != 0) {
-                if (data.slippage == 0 || (data.side == orderSide.BUY ? data.prices[i] < data.slippage : data.prices[i] > data.slippage)) {
+                uint price = uint(data.prices[i] + data.bestPriceOpposite).div(2);
+                if (data.slippage == 0 || (data.side == orderSide.BUY ? price <= data.slippage : price >= data.slippage)) {
                     totalAmountConverted += data.side == orderSide.BUY ?
                         uint(data.amounts[i] * data.prices[i]).div(1 ether).toUint128() :
                         uint(data.amounts[i] * 1 ether).div(data.prices[i]).toUint128();

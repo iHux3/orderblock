@@ -11,9 +11,9 @@ describe("OrderBlock contract", function() {
     await orderBlock.createOrder(1, web3.utils.toWei('1', 'ether'), web3.utils.toWei('1', 'ether'), 0, 0, 0);
     await orderBlock.createOrder(1, web3.utils.toWei('2', 'ether'), web3.utils.toWei('1', 'ether'), 1, 0, 0, {value: web3.utils.toWei('1', 'ether')});
     await orderBlock.createOrder(1, web3.utils.toWei('3', 'ether'), web3.utils.toWei('1', 'ether'), 1, 0, 0, {value: web3.utils.toWei('1', 'ether')});
-    await orderBlock.createOrder(1, web3.utils.toWei('1.8', 'ether'), web3.utils.toWei('3', 'ether'), 0, 1, 0);
+    //await orderBlock.createOrder(1, web3.utils.toWei('1.8', 'ether'), web3.utils.toWei('3', 'ether'), 0, 1, web3.utils.toWei('1.9', 'ether'));
    
-    await orderBlock.createOrder(1, web3.utils.toWei('1', 'ether'), web3.utils.toWei('2', 'ether'), 0, 2, 0);
+    await orderBlock.createOrder(1, web3.utils.toWei('1', 'ether'), web3.utils.toWei('3', 'ether'), 0, 2,  web3.utils.toWei('2', 'ether'));
     
     /*let price = await orderBlock.getPrice(1);
     console.log(price.toString());*/
