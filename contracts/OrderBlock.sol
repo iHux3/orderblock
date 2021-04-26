@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "hardhat/console.sol";
+import "./Utils.sol";
 
 contract OrderBlock 
 {
@@ -120,84 +121,25 @@ contract OrderBlock
         }
     }
 
-    function _transfer(address token, address sender, address receiver, uint amount) private 
-    {
-        if (token == ETH) {
-            payable(receiver).transfer(amount);
-        } else {
-            if (sender != msg.sender) {
-                IERC20(token).transfer(receiver, amount);
-            } else {
-                IERC20(token).transferFrom(sender, receiver, amount);
-            }
-        }
-    }
-
     function createOrder(uint128 _marketId, uint128 _price, uint128 _amount, orderSide _side, orderType _type, uint128 _slippage) external payable
     {
         //verify user input
         Market storage market = markets[_marketId];
         require(_marketId < marketId && marketId != 0, "INVALID_MARKET_ID");
-        require(uint8(_type) < 3, "INVALID_TYPE");
-        require(uint8(_side) < 2, "INVALID_SIDE");
-
-        //verify amount
-        require(_amount >= 10 ** 9 && _amount % 10 ** 9 == 0, "INVALID_AMOUNT");
-
-        //verify price
-        require(_price >= 10 ** 9 && _price % 10 ** 9 == 0, "INVALID_PRICE");
-        if (_type != orderType.MARKET) {
-            uint nearestBuyLimit = getNearestLimit(_marketId, orderSide.BUY);
-            uint nearestSellLimit = getNearestLimit(_marketId, orderSide.SELL);
-            if (_type == orderType.LIMIT) {
-                if (_side == orderSide.BUY) {
-                    if (nearestSellLimit != 0) require(_price < nearestSellLimit, "PRICE > BEST SELL PRICE");
-                } else {
-                    if (nearestBuyLimit != 0) require(_price > nearestBuyLimit, "PRICE < BEST BUY PRICE");
-                }
-            } else {
-                uint price = (nearestBuyLimit + nearestSellLimit).div(2);
-                if (price > 0) {
-                    if (_side == orderSide.BUY) {
-                        require(_price > price, "PRICE < ACTUAL PRICE");
-                    } else {
-                        require(_price < price, "PRICE > ACTUAL PRICE");
-                    }
-                }
-            }
-        }
-        
-        //verify token amount sent
+        uint128 nearestBuyLimit = getNearestLimit(_marketId, orderSide.BUY);
+        uint128 nearestSellLimit = getNearestLimit(_marketId, orderSide.SELL);
         address tokenAddress = _side == orderSide.BUY ? market.quote : market.base;
+        Utils.verifyOrderInput(
+            _price,
+            _amount,
+            _side,
+            _type, 
+            _slippage, 
+            nearestBuyLimit,
+            nearestSellLimit,
+            tokenAddress
+        );
 
-        if (tokenAddress == ETH) {
-            if (_type != orderType.STOP) {
-                require(msg.value == _amount, "GIVEN AMOUNT != ETH SENT");
-            } else {
-                require(msg.value == _amount + STOPORDER_FEE, "NO_STOP_ORDER_FEE");
-            }
-        } else {
-            IERC20 token = IERC20(tokenAddress);
-            require(IERC20(token).balanceOf(msg.sender) >= _amount, 'NO_TOKEN_BALANCE');
-            require(IERC20(token).allowance(msg.sender, address(this)) >= _amount, 'NO_TOKEN_ALLOWANCE');
-
-            if (_type != orderType.MARKET) {
-                token.transferFrom(msg.sender, address(this), _amount);
-            }
-
-            if (_type == orderType.STOP) {
-                require(msg.value == STOPORDER_FEE, "NO_STOP_ORDER_FEE");
-            }
-        }
-
-        //verify slippage
-        if (_type == orderType.LIMIT) {
-            require(_slippage == 0, "INVALID_SLIPPAGE");
-        } else {
-            if (_slippage > 0) {
-                require(_side == orderSide.BUY ? _slippage > _price : _slippage < _price, "INVALID_SLIPPAGE");
-            }
-        }
 
         //core
         if (_type != orderType.MARKET) {
@@ -216,7 +158,7 @@ contract OrderBlock
                 }
             }
             
-            _ordersPop(marketOrders, marketOrdersStorage);
+            Utils.ordersPop(marketOrders, marketOrdersStorage);
             if (!created) marketOrdersStorage.push(orderId);
         } else {
             //market order
@@ -245,11 +187,11 @@ contract OrderBlock
             }
             data.bestPriceOpposite = getNearestLimit(data.marketId, data.side);
 
-            if (!_isFillable(data)) revert("NOT ENOUGH ORDERS TO FILL THE ORDER");
+            if (!Utils._isFillable(data)) revert("NOT ENOUGH ORDERS TO FILL THE ORDER");
 
             data.bestPrice = _marketOrder(data, marketOrdersStorage);
             _executeStopOrders(data, marketOrdersStorage);
-            _ordersPop(marketOrders, marketOrdersStorage);
+            Utils.ordersPop(marketOrders, marketOrdersStorage);
         }
 
         //create order
@@ -276,11 +218,11 @@ contract OrderBlock
                     data.amount = o.amountTotal;
                     data.creator = o.creator;
                     data.slippage = o.slippage;
-                    if (_isFillable(data)) {
+                    if (Utils._isFillable(data)) {
                         data.bestPrice = _marketOrder(data, marketOrdersStorage);
                         executedCount++;
                     } else {
-                        _transfer(data.tokenAddress, address(this), data.creator, data.amount);
+                        Utils.transfer(data.tokenAddress, address(this), data.creator, data.amount);
                         payable(data.creator).transfer(STOPORDER_FEE);
                         o.typee = uint8(orderType.FAILED);
                         emit OrderChanged(data.marketId, id, 0, uint8(orderType.FAILED));
@@ -294,38 +236,9 @@ contract OrderBlock
         //send fee to market order creator
         if (executedCount > 0) payable(msg.sender).transfer(STOPORDER_FEE * executedCount);
 
-        _ordersPop(marketStopOrders, marketStopOrdersStorage);
+        Utils.ordersPop(marketStopOrders, marketStopOrdersStorage);
     }
     
-    function _isFillable(OrderData memory data) private pure returns(bool)
-    {
-        uint totalAmountConverted;
-        for (uint i = 0; i < data.marketOrders.length; i++) {
-            if (data.marketOrders[i] != 0) {
-                uint price = uint(data.prices[i] + data.bestPriceOpposite).div(2);
-                if (data.slippage == 0 || (data.side == orderSide.BUY ? price <= data.slippage : price >= data.slippage)) {
-                    totalAmountConverted += data.side == orderSide.BUY ?
-                        uint(data.amounts[i] * data.prices[i]).div(1 ether).toUint128() :
-                        uint(data.amounts[i] * 1 ether).div(data.prices[i]).toUint128();
-                }
-            }
-        }
-        return totalAmountConverted >= data.amount;
-    }
-
-    function _ordersPop(uint128[] memory marketOrders, uint128[] storage marketOrdersStorage) private
-    {
-        uint len = marketOrders.length;
-        if (len > 0) {
-            for (uint i = len - 1; i > 0; i--) {
-                if (marketOrders[i] == 0) {
-                    marketOrdersStorage.pop();
-                } else { 
-                    break;
-                }
-            }
-        }
-    }
 
     function _marketOrder(OrderData memory data, uint128[] storage marketOrdersStorage) private returns(uint128)
     {
@@ -369,13 +282,13 @@ contract OrderBlock
 
             if (orderAmountConverted > remainingAmount) {
                 //marketOrder creator sends
-                _transfer(data.tokenAddress, data.creator, matchedOrder.creator, remainingAmount);
+                Utils.transfer(data.tokenAddress, data.creator, matchedOrder.creator, remainingAmount);
                 
                 //matched creator sends
                 uint128 amountToSend = data.side == orderSide.BUY ?
                     uint(remainingAmount * 1 ether).div(bestPrice).toUint128() :
                     uint(remainingAmount * bestPrice).div(1 ether).toUint128();
-                _transfer(data.tokenAddressSecond, address(this), data.creator, amountToSend);
+                Utils.transfer(data.tokenAddressSecond, address(this), data.creator, amountToSend);
 
                 matchedOrder.amount -= amountToSend;
                 data.amounts[bestPriceIndex] -= amountToSend;
@@ -384,10 +297,10 @@ contract OrderBlock
             } else {
                 if (orderAmountConverted == remainingAmount) findNext = true;
                 //marketOrder creator sends
-                _transfer(data.tokenAddress, msg.sender, matchedOrder.creator, orderAmountConverted);
+                Utils.transfer(data.tokenAddress, msg.sender, matchedOrder.creator, orderAmountConverted);
 
                 //matched creator sends
-                _transfer(data.tokenAddressSecond, address(this), data.creator, orderAmount);
+                Utils.transfer(data.tokenAddressSecond, address(this), data.creator, orderAmount);
 
                 remainingAmount -= orderAmountConverted;
                 matchedOrder.amount = 0;
@@ -401,7 +314,7 @@ contract OrderBlock
         return bestPrice;
     }
 	
-    /*function cancelOrder(uint128 _marketId, uint128 _orderId) external 
+    function cancelOrder(uint128 _marketId, uint128 _orderId) external 
     {
         //verify user input
         Order storage order = orders[_orderId];
@@ -430,13 +343,13 @@ contract OrderBlock
 
         //send tokens
         address tokenAddress = side == orderSide.BUY ? market.quote : market.base;
-        _transfer(tokenAddress, address(this), msg.sender, order.amount);
+        Utils.transfer(tokenAddress, address(this), msg.sender, order.amount);
         if (typee == orderType.STOP) payable(msg.sender).transfer(STOPORDER_FEE);
 
         //cancel order
         order.typee = uint8(orderType.CANCELED);
         OrderCanceled(_marketId, _orderId);
-    }*/
+    }
 
     function getNearestLimit(uint128 _marketId, orderSide _side) public view returns(uint128)
     {
@@ -468,7 +381,7 @@ contract OrderBlock
         return uint(getNearestLimit(_marketId, orderSide.BUY) + getNearestLimit(_marketId, orderSide.SELL)).div(2).toUint128();
     }
 
-    /*function getMarketOrders(uint _marketId, orderSide _side, orderType _type) public view returns(Order[] memory, uint128[] memory) 
+    function getMarketOrders(uint _marketId, orderSide _side, orderType _type) public view returns(Order[] memory, uint128[] memory) 
     {
         Market storage market = markets[_marketId];
         return getOrders(_side == orderSide.BUY ? 
@@ -488,5 +401,5 @@ contract OrderBlock
             o[i] = orders[ids[i]];
         }
         return (o, ids);
-    }*/
+    }
 }
