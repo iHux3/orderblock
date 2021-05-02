@@ -13,7 +13,7 @@ library Utils {
     address constant ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     uint constant STOPORDER_FEE = 0;
 
-    function _isFillable(OrderBlock.OrderData memory data) public pure returns(bool)
+    function _isFillable(OrderBlock.OrderData memory data) external pure returns(bool)
     {
         uint totalAmountConverted;
         for (uint i = 0; i < data.marketOrders.length; i++) {
@@ -29,7 +29,7 @@ library Utils {
         return totalAmountConverted >= data.amount;
     }
 
-    function transfer(address token, address sender, address receiver, uint amount) public 
+    function transfer(address token, address sender, address receiver, uint amount) external 
     {
         if (token == ETH) {
             payable(receiver).transfer(amount);
@@ -43,7 +43,7 @@ library Utils {
     }
     
 
-    function ordersPop(uint128[] memory marketOrders, uint128[] storage marketOrdersStorage) public
+    function ordersPop(uint128[] memory marketOrders, uint128[] storage marketOrdersStorage) external
     {
         uint len = marketOrders.length;
         if (len > 0) {
@@ -58,7 +58,7 @@ library Utils {
     }
 
     function verifyOrderInput(uint128 _price, uint128 _amount, OrderBlock.orderSide _side, OrderBlock.orderType _type, uint128 _slippage, 
-        uint128 nearestBuyLimit, uint128 nearestSellLimit, address tokenAddress) public
+        uint128 nearestBuyLimit, uint128 nearestSellLimit, address tokenAddress) external
     {
         require(uint8(_type) < 3, "INVALID_TYPE");
         require(uint8(_side) < 2, "INVALID_SIDE");

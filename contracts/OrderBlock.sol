@@ -87,7 +87,7 @@ contract OrderBlock
     );
 
     uint128 orderId = 1;
-    uint128 marketId = 1;
+    uint128 public marketId = 1;
     mapping(uint => Market) markets;
     mapping(uint => Order) orders;
     mapping(address => User) users;
@@ -339,7 +339,7 @@ contract OrderBlock
                 break;
             }
         }
-        require(found, "ORDER NOT FOUND IN GIVEN MARKET");
+        require(found, "ORDER_NOT_FOUDN");
 
         //send tokens
         address tokenAddress = side == orderSide.BUY ? market.quote : market.base;
@@ -348,7 +348,7 @@ contract OrderBlock
 
         //cancel order
         order.typee = uint8(orderType.CANCELED);
-        OrderCanceled(_marketId, _orderId);
+        emit OrderCanceled(_marketId, _orderId);
     }
 
     function getNearestLimit(uint128 _marketId, orderSide _side) public view returns(uint128)
