@@ -5,10 +5,11 @@ pragma abicoder v2;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import "./interfaces/IOrderBlock.sol";
+import "./libraries/Utils.sol";
 import "hardhat/console.sol";
-import "./Utils.sol";
 
-contract OrderBlock 
+contract OrderBlock is IOrderBlock
 {
     using SafeMath for uint;
     using SafeCast for uint;
@@ -16,78 +17,8 @@ contract OrderBlock
     address constant ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     uint constant STOPORDER_FEE = 0;
 
-    enum orderType {
-        LIMIT, STOP, MARKET, EXECUTED, CANCELED, FAILED
-    }
-
-    enum orderSide {
-        BUY, SELL
-    }
-
-    struct User {
-        uint128[] orders;
-    }
-
-    struct Market {
-        address base;
-        address quote;
-        uint128[] buyLimitOrders;
-        uint128[] sellLimitOrders;
-        uint128[] buyStopOrders;
-        uint128[] sellStopOrders;
-    }
-
-    struct Order {
-        address creator;
-        uint128 marketId;
-        uint128 price;
-        uint128 amountTotal;
-        uint128 amount;
-        uint128 slippage;
-        uint48 createdAt;
-        uint8 side;
-        uint8 typee;
-    }
-
-     struct OrderData {
-        uint128 marketId;
-        orderSide side;
-        uint128 amount;
-        address creator;
-        uint128 slippage;
-
-        uint128[] marketOrders;
-        uint128[] prices;
-        uint128[] amounts;
-        address tokenAddress;
-        address tokenAddressSecond;
-        uint128 bestPrice;
-        uint128 bestPriceOpposite;
-    }
-
-    event OrderCreated (
-        uint128 indexed marketId,
-        uint128 price,
-        uint128 amount,
-        uint48 createdAt,
-        uint8 side,
-        uint8 typee
-    );
-
-    event OrderChanged (
-        uint128 indexed marketId,
-        uint128 orderId,
-        uint128 amount,
-        uint8 typee
-    );
-
-    event OrderCanceled (
-        uint128 indexed marketId,
-        uint128 orderId
-    );
-
     uint128 orderId = 1;
-    uint128 public marketId = 1;
+    uint128 marketId = 1;
     mapping(uint => Market) markets;
     mapping(uint => Order) orders;
     mapping(address => User) users;
@@ -125,9 +56,9 @@ contract OrderBlock
     {
         //verify user input
         Market storage market = markets[_marketId];
-        require(_marketId < marketId && marketId != 0, "INVALID_MARKET_ID");
-        uint128 nearestBuyLimit = getNearestLimit(_marketId, orderSide.BUY);
-        uint128 nearestSellLimit = getNearestLimit(_marketId, orderSide.SELL);
+        require(_marketId < marketId && marketId != 0, "INVALID_MARKET");
+        uint128 nearestBuyLimit = Utils.getNearestLimit(market, orderSide.BUY, orders);
+        uint128 nearestSellLimit = Utils.getNearestLimit(market, orderSide.SELL, orders);
         address tokenAddress = _side == orderSide.BUY ? market.quote : market.base;
         Utils.verifyOrderInput(
             _price,
@@ -164,7 +95,7 @@ contract OrderBlock
             //market order
             uint128[] storage marketOrdersStorage = _side == orderSide.BUY ? market.sellLimitOrders : market.buyLimitOrders;
             uint128[] memory marketOrders = marketOrdersStorage;
-            require(marketOrders.length > 0, _side == orderSide.BUY ? "NO_SELL_LIMIT_ORDERS" : "NO_BUY_LIMIT_ORDERS");
+            require(marketOrders.length > 0, "NO_LIMIT_ORDERS");
 
             OrderData memory data = OrderData(
                 _marketId,
@@ -185,9 +116,9 @@ contract OrderBlock
                 data.prices[i] = orders[marketOrders[i]].price;
                 data.amounts[i] = orders[marketOrders[i]].amount;
             }
-            data.bestPriceOpposite = getNearestLimit(data.marketId, data.side);
+            data.bestPriceOpposite = Utils.getNearestLimit(market, data.side, orders);
 
-            if (!Utils._isFillable(data)) revert("NOT ENOUGH ORDERS TO FILL THE ORDER");
+            if (!Utils._isFillable(data)) revert("NOT_FILLABLE");
 
             data.bestPrice = _marketOrder(data, marketOrdersStorage);
             _executeStopOrders(data, marketOrdersStorage);
@@ -319,11 +250,11 @@ contract OrderBlock
         //verify user input
         Order storage order = orders[_orderId];
         Market storage market = markets[_marketId];
-        require(_orderId < orderId && _orderId != 0, "INVALID_ORDER_ID");
-        require(_marketId < marketId && _marketId != 0, "INVALID_MARKET_ID");
-        require(order.creator == msg.sender, "ONLY_CREATOR");
+        require(_orderId < orderId && _orderId != 0, "INVALID_ORDER");
+        require(_marketId < marketId && _marketId != 0, "INVALID_MARKET");
+        require(order.creator == msg.sender, "INVALID_SENDER");
         orderType typee = orderType(order.typee);
-        require(typee == orderType.LIMIT || typee == orderType.STOP, "INVALID_ORDER_TYPE");
+        require(typee == orderType.LIMIT || typee == orderType.STOP, "INVALID_TYPE");
         orderSide side = orderSide(order.side);
 
         //remove order from market ids
@@ -339,7 +270,7 @@ contract OrderBlock
                 break;
             }
         }
-        require(found, "ORDER_NOT_FOUDN");
+        require(found, "ORDER_NOT_FOUND");
 
         //send tokens
         address tokenAddress = side == orderSide.BUY ? market.quote : market.base;
@@ -351,34 +282,23 @@ contract OrderBlock
         emit OrderCanceled(_marketId, _orderId);
     }
 
-    function getNearestLimit(uint128 _marketId, orderSide _side) public view returns(uint128)
+
+
+    function getPairs() public view returns(address[] memory bases, address[] memory quotes)
     {
-        Market storage market = markets[_marketId];
-        uint128[] storage marketOrdersStorage = _side == orderSide.BUY ? market.buyLimitOrders : market.sellLimitOrders;
-        uint128[] memory marketOrders = marketOrdersStorage;
-        uint128 bestPrice;
-
-        for (uint i = 0; i < marketOrders.length; i++) {
-            uint id = marketOrders[i];
-            if (id != 0) {
-                Order storage o = orders[marketOrders[i]];
-                if (bestPrice == 0) {
-                    bestPrice = o.price;
-                } else {
-                    uint128 price = o.price;
-                    if (_side == orderSide.BUY ? price > bestPrice : price < bestPrice) {
-                        bestPrice = price;
-                    }
-                }
-            }
+        uint _marketId = marketId - 1;
+        bases = new address[](_marketId);
+        quotes = new address[](_marketId);
+        for (uint i = 0; i < _marketId; i++) {
+            bases[i] = markets[i + 1].base;
+            quotes[i] = markets[i + 1].quote;
         }
-
-        return bestPrice;
     }
 	
     function getPrice(uint128 _marketId) public view returns(uint128) 
     {
-        return uint(getNearestLimit(_marketId, orderSide.BUY) + getNearestLimit(_marketId, orderSide.SELL)).div(2).toUint128();
+        Market storage market = markets[_marketId];
+        return uint(Utils.getNearestLimit(market, orderSide.BUY, orders) + Utils.getNearestLimit(market, orderSide.SELL, orders)).div(2).toUint128();
     }
 
     function getMarketOrders(uint _marketId, orderSide _side, orderType _type) public view returns(Order[] memory, uint128[] memory) 
@@ -394,7 +314,7 @@ contract OrderBlock
         return getOrders(users[_user].orders);
     }
 
-    function getOrders(uint128[] memory ids) public view returns(Order[] memory, uint128[] memory)
+    function getOrders(uint128[] memory ids) private view returns(Order[] memory, uint128[] memory)
     {
         Order[] memory o = new Order[](ids.length);
         for (uint i = 0; i < ids.length; i++) {
