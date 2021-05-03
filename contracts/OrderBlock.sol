@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 pragma abicoder v2;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "./interfaces/IOrderBlock.sol";
@@ -284,14 +285,14 @@ contract OrderBlock is IOrderBlock
 
 
 
-    function getPairs() public view returns(address[] memory bases, address[] memory quotes)
+    function getPairs() public view returns(string[] memory bases, string[] memory quotes)
     {
         uint _marketId = marketId - 1;
-        bases = new address[](_marketId);
-        quotes = new address[](_marketId);
+        bases = new string[](_marketId);
+        quotes = new string[](_marketId);
         for (uint i = 0; i < _marketId; i++) {
-            bases[i] = markets[i + 1].base;
-            quotes[i] = markets[i + 1].quote;
+            bases[i] = IERC20Metadata(markets[i + 1].base).symbol();
+            quotes[i] = IERC20Metadata(markets[i + 1].base).symbol();
         }
     }
 	
