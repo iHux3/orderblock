@@ -16,7 +16,7 @@ contract OrderBlock is IOrderBlock
     using SafeCast for uint;
 
     address constant ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
-    uint constant STOPORDER_FEE = 0;
+    uint constant STOPORDER_FEE = 5 * 10 ** 15;
 
     uint128 orderId = 1;
     uint128 marketId = 1;
@@ -90,7 +90,7 @@ contract OrderBlock is IOrderBlock
                 }
             }
             
-            Utils.ordersPop(marketOrders, marketOrdersStorage);
+            _ordersPop(marketOrders, marketOrdersStorage);
             if (!created) marketOrdersStorage.push(orderId);
         } else {
             //market order
@@ -123,7 +123,7 @@ contract OrderBlock is IOrderBlock
 
             data.bestPrice = _marketOrder(data, marketOrdersStorage);
             _executeStopOrders(data, marketOrdersStorage);
-            Utils.ordersPop(marketOrders, marketOrdersStorage);
+            _ordersPop(marketOrders, marketOrdersStorage);
         }
 
         //create order
@@ -168,9 +168,22 @@ contract OrderBlock is IOrderBlock
         //send fee to market order creator
         if (executedCount > 0) payable(msg.sender).transfer(STOPORDER_FEE * executedCount);
 
-        Utils.ordersPop(marketStopOrders, marketStopOrdersStorage);
+        _ordersPop(marketStopOrders, marketStopOrdersStorage);
     }
     
+    function _ordersPop(uint128[] memory marketOrders, uint128[] storage marketOrdersStorage) private
+    {
+        uint len = marketOrders.length;
+        if (len > 0) {
+            for (uint i = len - 1; i > 0; i--) {
+                if (marketOrders[i] == 0) {
+                    marketOrdersStorage.pop();
+                } else { 
+                    break;
+                }
+            }
+        }
+    }
 
     function _marketOrder(OrderData memory data, uint128[] storage marketOrdersStorage) private returns(uint128)
     {
@@ -291,8 +304,10 @@ contract OrderBlock is IOrderBlock
         bases = new string[](_marketId);
         quotes = new string[](_marketId);
         for (uint i = 0; i < _marketId; i++) {
-            bases[i] = IERC20Metadata(markets[i + 1].base).symbol();
-            quotes[i] = IERC20Metadata(markets[i + 1].base).symbol();
+            address base = markets[i + 1].base;
+            address quote = markets[i + 1].quote;
+            bases[i] = base == ETH ? "ETH" : IERC20Metadata(base).symbol();
+            quotes[i] = quote == ETH ? "ETH" : IERC20Metadata(quote).symbol();
         }
     }
 	

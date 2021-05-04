@@ -41,21 +41,6 @@ library Utils {
             }
         }
     }
-    
-
-    function ordersPop(uint128[] memory marketOrders, uint128[] storage marketOrdersStorage) external
-    {
-        uint len = marketOrders.length;
-        if (len > 0) {
-            for (uint i = len - 1; i > 0; i--) {
-                if (marketOrders[i] == 0) {
-                    marketOrdersStorage.pop();
-                } else { 
-                    break;
-                }
-            }
-        }
-    }
 
     function verifyOrderInput(uint128 _price, uint128 _amount, IOrderBlock.orderSide _side, IOrderBlock.orderType _type, uint128 _slippage, 
         uint128 nearestBuyLimit, uint128 nearestSellLimit, address tokenAddress) external
