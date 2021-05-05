@@ -11,7 +11,7 @@ library Utils {
     using SafeMath for uint;
     using SafeCast for uint;
     address constant ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
-    uint constant STOPORDER_FEE = 0;
+    uint constant STOPORDER_FEE = 5 * 10 ** 15;
 
     function _isFillable(IOrderBlock.OrderData memory data) external pure returns(bool)
     {
