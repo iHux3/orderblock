@@ -298,16 +298,20 @@ contract OrderBlock is IOrderBlock
 
 
 
-    function getPairs() public view returns(string[] memory bases, string[] memory quotes)
+    function getPairs() public view returns(string[] memory bases, string[] memory quotes, address[] memory basesAddr, address[] memory quotesAddr)
     {
         uint _marketId = marketId - 1;
         bases = new string[](_marketId);
         quotes = new string[](_marketId);
+        basesAddr = new address[](_marketId);
+        quotesAddr = new address[](_marketId);
         for (uint i = 0; i < _marketId; i++) {
             address base = markets[i + 1].base;
             address quote = markets[i + 1].quote;
             bases[i] = base == ETH ? "ETH" : IERC20Metadata(base).symbol();
             quotes[i] = quote == ETH ? "ETH" : IERC20Metadata(quote).symbol();
+            basesAddr[i] = base;
+            quotesAddr[i] = quote;
         }
     }
 	
