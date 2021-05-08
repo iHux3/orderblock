@@ -18,6 +18,27 @@ contract OrderBlock is IOrderBlock
     address constant ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     uint constant STOPORDER_FEE = 5 * 10 ** 15;
 
+    event OrderCreated (
+        uint128 marketId,
+        uint128 price,
+        uint128 amount,
+        uint48 createdAt,
+        uint8 side,
+        uint8 typee
+    );
+
+    event OrderChanged (
+        uint128 marketId,
+        uint128 orderId,
+        uint128 amount,
+        uint8 typee
+    );
+
+    event OrderCanceled (
+        uint128 marketId,
+        uint128 orderId
+    );
+
     uint128 orderId = 1;
     uint128 marketId = 1;
     mapping(uint => Market) markets;
@@ -25,7 +46,7 @@ contract OrderBlock is IOrderBlock
     mapping(address => User) users;
     mapping(address => address[]) pairs;
 
-    function createMarket(address _base, address _quote) external 
+    function createMarket(address _base, address _quote) external override
     {
         //verify user input
         require(_base != _quote, "SAME_TOKENS");
@@ -33,8 +54,14 @@ contract OrderBlock is IOrderBlock
         _checkIfExists(_quote, _base);
 
         //basic verification address is a token
-        if (_base != ETH) IERC20(_base).totalSupply();
-        if (_quote != ETH) IERC20(_quote).totalSupply();
+        if (_base != ETH) {
+            IERC20(_base).totalSupply();
+            IERC20Metadata(_base).symbol();
+        }
+        if (_quote != ETH) {
+            IERC20(_quote).totalSupply();
+            IERC20Metadata(_quote).symbol();
+        } 
 
         //create market
         markets[marketId].base = _base;
@@ -53,7 +80,7 @@ contract OrderBlock is IOrderBlock
         }
     }
 
-    function createOrder(uint128 _marketId, uint128 _price, uint128 _amount, orderSide _side, orderType _type, uint128 _slippage) external payable
+    function createOrder(uint128 _marketId, uint128 _price, uint128 _amount, orderSide _side, orderType _type, uint128 _slippage) external override payable
     {
         //verify user input
         Market storage market = markets[_marketId];
@@ -259,7 +286,7 @@ contract OrderBlock is IOrderBlock
         return bestPrice;
     }
 	
-    function cancelOrder(uint128 _marketId, uint128 _orderId) external 
+    function cancelOrder(uint128 _marketId, uint128 _orderId) external override
     {
         //verify user input
         Order storage order = orders[_orderId];
@@ -298,7 +325,7 @@ contract OrderBlock is IOrderBlock
 
 
 
-    function getPairs() public view returns(string[] memory bases, string[] memory quotes, address[] memory basesAddr, address[] memory quotesAddr)
+    function getPairs() external override view returns(string[] memory bases, string[] memory quotes, address[] memory basesAddr, address[] memory quotesAddr)
     {
         uint _marketId = marketId - 1;
         bases = new string[](_marketId);
@@ -315,26 +342,26 @@ contract OrderBlock is IOrderBlock
         }
     }
 	
-    function getPrice(uint128 _marketId) public view returns(uint128) 
+    function getPrice(uint128 _marketId) external override view returns(uint128) 
     {
         Market storage market = markets[_marketId];
         return uint(Utils.getNearestLimit(market, orderSide.BUY, orders) + Utils.getNearestLimit(market, orderSide.SELL, orders)).div(2).toUint128();
     }
 
-    function getMarketOrders(uint _marketId, orderSide _side, orderType _type) public view returns(Order[] memory, uint128[] memory) 
+    function getMarketOrders(uint _marketId, orderSide _side, orderType _type) external override view returns(Order[] memory, uint128[] memory) 
     {
         Market storage market = markets[_marketId];
-        return getOrders(_side == orderSide.BUY ? 
+        return _getOrders(_side == orderSide.BUY ? 
             (_type == orderType.LIMIT ? market.buyLimitOrders : market.buyStopOrders) :
             (_type == orderType.LIMIT ? market.sellLimitOrders : market.sellStopOrders));
     }
 
-    function getUserOrders(address _user) public view returns(Order[] memory, uint128[] memory) 
+    function getUserOrders(address _user) external override view returns(Order[] memory, uint128[] memory) 
     {
-        return getOrders(users[_user].orders);
+        return _getOrders(users[_user].orders);
     }
 
-    function getOrders(uint128[] memory ids) private view returns(Order[] memory, uint128[] memory)
+    function _getOrders(uint128[] memory ids) private view returns(Order[] memory, uint128[] memory)
     {
         Order[] memory o = new Order[](ids.length);
         for (uint i = 0; i < ids.length; i++) {
