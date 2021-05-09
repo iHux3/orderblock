@@ -20,6 +20,7 @@ contract OrderBlock is IOrderBlock
 
     event OrderCreated (
         uint128 marketId,
+        uint128 orderId,
         uint128 price,
         uint128 amount,
         uint48 createdAt,
@@ -154,11 +155,12 @@ contract OrderBlock is IOrderBlock
         }
 
         //create order
-        orders[orderId] = Order(msg.sender, _marketId, _price, _amount, _type == orderType.LIMIT ? _amount : 0, _slippage,
+        uint128 _orderId = orderId;
+        orders[_orderId] = Order(msg.sender, _marketId, _price, _amount, _type == orderType.LIMIT ? _amount : 0, _slippage,
             uint48(block.timestamp), uint8(_side), uint8(_type));
-        users[msg.sender].orders.push(orderId);
+        users[msg.sender].orders.push(_orderId);
+        emit OrderCreated(_marketId, _orderId, _price, _amount, uint48(block.timestamp), uint8(_side), uint8(_type));
         orderId++;
-        emit OrderCreated(_marketId, _price, _amount, uint48(block.timestamp), uint8(_side), uint8(_type));
     }
 
     function _executeStopOrders(OrderData memory data, uint128[] storage marketOrdersStorage) private 
