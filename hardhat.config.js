@@ -17,8 +17,8 @@ module.exports = {
         }
     },
     networks: {
-        ropsten: {
-            url: `https://ropsten.infura.io/v3/${process.env.INFURA_KEY}`,
+        kovan: {
+            url: `https://kovan.infura.io/v3/${process.env.INFURA_KEY}`,
             accounts: [`0x${process.env.DEPLOYER_PRIVATE_KEY}`]
         }
     }
