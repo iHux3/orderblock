@@ -2,7 +2,6 @@
 pragma solidity ^0.8.0;
 
 interface IOrderBlock {
-    
     enum orderType {
         LIMIT, STOP, MARKET, EXECUTED, CANCELED, FAILED
     }
@@ -34,22 +33,6 @@ interface IOrderBlock {
         uint48 createdAt;
         uint8 side;
         uint8 typee;
-    }
-
-     struct OrderData {
-        uint128 marketId;
-        orderSide side;
-        uint128 amount;
-        address creator;
-        uint128 slippage;
-
-        uint128[] marketOrders;
-        uint128[] prices;
-        uint128[] amounts;
-        address tokenAddress;
-        address tokenAddressSecond;
-        uint128 bestPrice;
-        uint128 bestPriceOpposite;
     }
 
     function createMarket(address _base, address _quote) external;
