@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
-pragma abicoder v2;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -256,44 +255,6 @@ contract OrderBlock is IOrderBlock, IComparing
         require(bestOrderId != 0, "NOT_ENOUGH_ORDERS");
         return (bestOrderId, bestPrice);
     }
-    
-    /*function _executeStopOrders(OrderData memory data, uint128[] storage marketOrders) private 
-    {
-        Market storage market = markets[data.marketId];
-        uint executedCount;
-        uint128[] storage marketStopOrdersStorage = data.side == orderSide.BUY ? market.buyStopOrders : market.sellStopOrders;
-        uint128[] memory marketStopOrders = marketStopOrdersStorage;
-        for (uint i = 0; i < marketStopOrders.length; i++) {
-            uint128 id = marketStopOrders[i];
-            uint price = uint(data.bestPrice + data.bestPriceOpposite).div(2);
-            if (id != 0) {
-                Order storage o = orders[id];
-                data.side = orderSide(o.side);
-                if (data.bestPrice > 0 && data.bestPriceOpposite > 0 && (data.side == orderSide.BUY ? o.price <= price : o.price >= price)) {
-                    data.amount = o.amountTotal;
-                    data.creator = o.creator;
-                    data.slippage = o.slippage;
-                    if (Utils._isFillable(data)) {
-                        data.bestPrice = _marketOrder(data, marketOrders);
-                        executedCount++;
-                    } else {
-                        Utils.transfer(data.tokenAddress, address(this), data.creator, data.amount);
-                        payable(data.creator).transfer(STOPORDER_FEE);
-                        o.typee = uint8(orderType.FAILED);
-                        emit OrderChanged(data.marketId, id, 0, uint8(orderType.FAILED));
-                    }
-                    marketStopOrders[i] = 0;
-                    marketStopOrdersStorage[i] = 0;
-                }
-            }
-        }
-
-        //send fee to market order creator
-        if (executedCount > 0) payable(msg.sender).transfer(STOPORDER_FEE * executedCount);
-
-        //_ordersPop(marketStopOrders, marketStopOrdersStorage);
-    }*/
-
 
 
     /**
