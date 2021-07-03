@@ -3,12 +3,10 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "../interfaces/IOrderBlock.sol";
 
 library Utils {
-    using SafeMath for uint;
     using SafeCast for uint;
     using SafeERC20 for IERC20;
 
@@ -49,7 +47,7 @@ library Utils {
                     if (nearestBuyLimit != 0) require(_price > nearestBuyLimit, "PRICE < BEST BUY PRICE");
                 }
             } else {
-                uint price = uint(nearestBuyLimit + nearestSellLimit).div(2);
+                uint price = (uint(nearestBuyLimit) + uint(nearestSellLimit)) / 2;
                 if (price > 0) {
                     if (_side == IOrderBlock.orderSide.BUY) {
                         require(_price > price, "PRICE < ACTUAL PRICE");

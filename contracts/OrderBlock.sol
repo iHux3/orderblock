@@ -3,7 +3,6 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "./interfaces/IOrderBlock.sol";
 import "./interfaces/IComparing.sol";
@@ -12,8 +11,6 @@ import "./libraries/Heap.sol";
 
 contract OrderBlock is IOrderBlock, IComparing
 {   
-    using SafeMath for uint;
-    using SafeMath for uint64;
     using SafeCast for uint;
     using Heap for uint64[];
 
@@ -77,7 +74,7 @@ contract OrderBlock is IOrderBlock, IComparing
         uint64 marketId = freeMarketId;
         markets[marketId].base = _base;
         markets[marketId].quote = _quote;
-        freeMarketId.add(1);
+        freeMarketId++;
 
         //init heaps
         markets[marketId].buyLimitOrders = Heap.init(64);
@@ -139,7 +136,7 @@ contract OrderBlock is IOrderBlock, IComparing
         );
         users[msg.sender].orders.push(_orderId);
         emit OrderCreated(_marketId, _orderId, _price, _amount, uint48(block.timestamp), _side, _type);
-        freeOrderId.add(1);
+        freeOrderId++;
     }
 	
     function cancelOrder(uint64 _orderId) external override lock
@@ -235,8 +232,8 @@ contract OrderBlock is IOrderBlock, IComparing
 
         uint64 bestOrderId;
         uint128 bestPrice;
-        uint maxIndex = marketOrders[0];
-        uint i = 1;
+        uint64 maxIndex = marketOrders[0];
+        uint64 i = 1;
         while (i < maxIndex) {
             uint64 top = marketOrders.getTop();
             if (orders[top].typee != orderType.CANCELED) {
@@ -256,17 +253,17 @@ contract OrderBlock is IOrderBlock, IComparing
         return (bestOrderId, bestPrice);
     }
 
+    function _convertOrderAmount(orderSide _side, uint128 _amount, uint128 _price) private pure returns (uint128) {
+        return _side == orderSide.BUY ?
+            (uint(_amount) * uint(_price) / 1 ether).toUint128() :
+            (uint(_amount) * 1 ether / uint(_price)).toUint128();
+    }
+
+
 
     /**
     VIEW FUNCTIONS
     */
-
-    function _convertOrderAmount(orderSide _side, uint128 _amount, uint128 _price) private pure returns (uint128) {
-        return _side == orderSide.BUY ?
-            uint(_amount * _price).div(1 ether).toUint128() :
-            uint(_amount * 1 ether).div(_price).toUint128();
-    }
-
 
     function getNearestLimitOrder(uint64 _marketId, orderSide _side) public view returns (uint128) {
         Market storage market = markets[_marketId];
@@ -293,7 +290,9 @@ contract OrderBlock is IOrderBlock, IComparing
 	
     function getPrice(uint64 _marketId) external override view returns (uint128) 
     {
-        return uint(getNearestLimitOrder(_marketId, orderSide.BUY) + getNearestLimitOrder(_marketId, orderSide.SELL)).div(2).toUint128();
+        uint nearestBuyLimit = getNearestLimitOrder(_marketId, orderSide.BUY);
+        uint nearestSellLimit = getNearestLimitOrder(_marketId, orderSide.SELL);
+        return ((nearestBuyLimit + nearestSellLimit) / 2).toUint128();
     }
 
     function getMarketOrders(uint64 _marketId, orderSide _side, orderType _type) external override view returns (Order[] memory, uint64[] memory) 

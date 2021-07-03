@@ -21,7 +21,7 @@ library Heap {
     function add(uint64[] storage data, uint64 value) internal {
         require(value != 0, "heap: adding zero");
         uint64 index = data[0];
-        require(index < 2**64 - 1, "heap: full");
+        require(index < type(uint64).max, "heap: full");
 
         fixUp(data, index, value);
         uint256 len = data.length;
@@ -94,7 +94,7 @@ library Heap {
     }
     
     function expandArray(uint64[] storage data, uint256 count) private {
-        for (uint64 i = 0; i < count; i++) {
+        for (uint256 i = 0; i < count; i++) {
             data.push();
         }
     }
