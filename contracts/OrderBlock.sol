@@ -74,7 +74,7 @@ contract OrderBlock is IOrderBlock, IComparing
         pairs[hashed] = true;
 
         //create market
-        uint128 marketId = freeMarketId;
+        uint64 marketId = freeMarketId;
         markets[marketId].base = _base;
         markets[marketId].quote = _quote;
         freeMarketId.add(1);

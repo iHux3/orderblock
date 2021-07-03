@@ -5,7 +5,6 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import "hardhat/console.sol";
 import "../interfaces/IOrderBlock.sol";
 
 library Utils {
@@ -15,16 +14,15 @@ library Utils {
 
     address constant ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
-    function transfer(address token, address sender, address receiver, uint amount) external 
+    function transfer(address tokenAddress, address sender, address receiver, uint amount) external 
     {
-        if (token == ETH) {
-            (bool success, ) = payable(receiver).call{value: amount}("");
-            require(success, "TRANSFERING_ETH_FAILED");
+        if (tokenAddress == ETH) {
+            payable(receiver).call{value: amount}("");
         } else {
             if (sender != msg.sender) {
-                IERC20(token).safeTransfer(receiver, amount);
+                IERC20(tokenAddress).safeTransfer(receiver, amount);
             } else {
-                IERC20(token).safeTransferFrom(sender, receiver, amount);
+                IERC20(tokenAddress).safeTransferFrom(sender, receiver, amount);
             }
         }
     }
@@ -40,7 +38,6 @@ library Utils {
         address tokenAddress) external
     {
         require(uint8(_type) < 3, "INVALID_TYPE");
-        require(uint8(_side) < 2, "INVALID_SIDE");
 
         //verify price
         require(_price >= 10 ** 9 && _price % 10 ** 9 == 0, "INVALID_PRICE");
@@ -69,11 +66,11 @@ library Utils {
             require(msg.value == _amount, "GIVEN AMOUNT != ETH SENT");
         } else {
             IERC20 token = IERC20(tokenAddress);
-            require(IERC20(token).balanceOf(msg.sender) >= _amount, 'NO_TOKEN_BALANCE');
-            require(IERC20(token).allowance(msg.sender, address(this)) >= _amount, 'NO_TOKEN_ALLOWANCE');
+            require(token.balanceOf(msg.sender) >= _amount, 'NO_TOKEN_BALANCE');
+            require(token.allowance(msg.sender, address(this)) >= _amount, 'NO_TOKEN_ALLOWANCE');
 
             if (_type != IOrderBlock.orderType.MARKET) {
-                token.transferFrom(msg.sender, address(this), _amount);
+                token.safeTransferFrom(msg.sender, address(this), _amount);
             }
         }
 
