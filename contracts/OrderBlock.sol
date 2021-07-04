@@ -278,7 +278,8 @@ contract OrderBlock is IOrderBlock, IComparing
     function getNearestLimitOrder(uint64 _marketId, orderSide _side) public view returns (uint128) {
         Market storage market = markets[_marketId];
         uint64[] storage marketOrders = _side == orderSide.BUY ? market.buyLimitOrders : market.sellLimitOrders;
-        return marketOrders.getTop();
+        uint64 orderId = marketOrders.getTop();
+        return orders[orderId].price;
     }
 
     function getPairs() external override view returns(string[] memory bases, string[] memory quotes, address[] memory basesAddr, address[] memory quotesAddr)
@@ -302,6 +303,7 @@ contract OrderBlock is IOrderBlock, IComparing
     {
         uint nearestBuyLimit = getNearestLimitOrder(_marketId, orderSide.BUY);
         uint nearestSellLimit = getNearestLimitOrder(_marketId, orderSide.SELL);
+        if (nearestBuyLimit == 0 || nearestSellLimit == 0) return 0;
         return ((nearestBuyLimit + nearestSellLimit) / 2).toUint128();
     }
 
