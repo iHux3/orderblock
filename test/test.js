@@ -1,48 +1,75 @@
+const { BigNumber } = require("@ethersproject/bignumber");
+const { expect } = require("chai");
+
 describe("OrderBlock contract", function() {
-  it("complex situation", async function() {
-    /*const [owner] = await ethers.getSigners();
-    const Utils = await ethers.getContractFactory("Utils");
-    const utils = await Utils.deploy();
+    let owner, orderBlock, testToken1, marketId;
+    it("deploy contracts and creates market ETH-TEST", async function() {
+        [owner] = await ethers.getSigners();
+        const Utils = await ethers.getContractFactory("Utils");
+        const utils = await Utils.deploy();
+        const OrderBlock = await ethers.getContractFactory("OrderBlock", { libraries: { Utils: utils.address }});
+        const TestToken1 = await ethers.getContractFactory("TestToken1");
+        orderBlock = await OrderBlock.deploy();
+        testToken1 = await TestToken1.deploy();
+        await orderBlock.createMarket("0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", testToken1.address);
+        marketId = 1;
+    });
 
-    const OrderBlock = await ethers.getContractFactory("OrderBlock", { libraries: { Utils: utils.address }});
-    const TestToken1 = await ethers.getContractFactory("TestToken1");
-    const orderBlock = await OrderBlock.deploy();
-    const testToken1 = await TestToken1.deploy();
-    await orderBlock.createMarket("0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", testToken1.address);
+    it("places buy limit orders", async function() {
+        const amount = web3.utils.toWei("1", "ether");
+        const amountTotal = web3.utils.toWei("3", "ether");
+        const tokenBalanceBefore = await testToken1.balanceOf(owner.address);
+        await testToken1.approve(orderBlock.address, amountTotal);
+
+        await orderBlock.createOrder(marketId, web3.utils.toWei("1"), amount, 0, 0, 0);
+        await orderBlock.createOrder(marketId, web3.utils.toWei("0.75"), amount, 0, 0, 0);
+        await orderBlock.createOrder(marketId, web3.utils.toWei("0.5"), amount, 0, 0, 0);
+
+        const actualPrice = await orderBlock.getPrice(marketId);
+        expect(actualPrice).to.equal(0);
+
+        const tokenBalanceAfter = await testToken1.balanceOf(owner.address);
+        expect(tokenBalanceBefore).to.equal(BigNumber.from(tokenBalanceAfter).add(BigNumber.from(amountTotal)));
+    });
+
+    it("places sell limit orders", async function() {
+        const amount = web3.utils.toWei("1");
+        const amountTotal = web3.utils.toWei("3");
+        const ethBalanceBefore = await web3.eth.getBalance(owner.address);
+
+        await orderBlock.createOrder(marketId, web3.utils.toWei("1.5"), amount, 1, 0, 0, {value: amount});
+        await orderBlock.createOrder(marketId, web3.utils.toWei("1.5"), amount, 1, 0, 0, {value: amount});
+        await orderBlock.createOrder(marketId, web3.utils.toWei("2"), amount, 1, 0, 0, {value: amount});
+
+        const actualPrice = await orderBlock.getPrice(marketId);
+        expect(actualPrice).to.equal(web3.utils.toWei("1.25"));
+
+        const ethBalanceAfter = await web3.eth.getBalance(owner.address);
+        expect(ethBalanceAfter).to.below(BigNumber.from(ethBalanceBefore).sub(BigNumber.from(amountTotal)));
+    });
+
     
-    await testToken1.approve(orderBlock.address, web3.utils.toWei('10', 'ether'));
-    await orderBlock.createOrder(1, web3.utils.toWei('1', 'ether'), web3.utils.toWei('1', 'ether'), 0, 0, 0);
-    await orderBlock.createOrder(1, web3.utils.toWei('2', 'ether'), web3.utils.toWei('1', 'ether'), 1, 0, 0, {value: web3.utils.toWei('1', 'ether')});
-    await orderBlock.createOrder(1, web3.utils.toWei('3', 'ether'), web3.utils.toWei('1', 'ether'), 1, 0, 0, {value: web3.utils.toWei('1', 'ether')});
-    await orderBlock.createOrder(1, web3.utils.toWei('1.8', 'ether'), web3.utils.toWei('3', 'ether'), 0, 1, 0);
-   
-    await orderBlock.createOrder(1, web3.utils.toWei('1', 'ether'), web3.utils.toWei('3', 'ether'), 0, 2, 0);*/
-    
-    /*let price = await orderBlock.getPrice(1);
-    console.log(price.toString());*/
+    it("cancels first buy limit order", async function() {
+        await orderBlock.cancelOrder(1);
+        const actualPrice = await orderBlock.getPrice(marketId);
+        expect(actualPrice).to.equal(web3.utils.toWei("1.125"));
+    });
 
-    /*let balance = await web3.eth.getBalance(owner.address);
-    console.log(web3.utils.fromWei(balance));*/
-  });
+    it("reverts too big sell market order", async function() {
+        const amount = web3.utils.toWei("4");
+        await expect(orderBlock.createOrder(marketId, web3.utils.toWei("1.125"), amount, 1, 2, 0, {value: amount})).to.be.revertedWith("NOT_ENOUGH_ORDERS");
+    });
 
-  it("buy limit, sell market", async function() {
-    const [owner] = await ethers.getSigners();
-    const Utils = await ethers.getContractFactory("Utils");
-    const utils = await Utils.deploy();
-    const OrderBlock = await ethers.getContractFactory("OrderBlock", { libraries: { Utils: utils.address }});
-    const TestToken1 = await ethers.getContractFactory("TestToken1");
-    const orderBlock = await OrderBlock.deploy();
-    const testToken1 = await TestToken1.deploy();
-    await orderBlock.createMarket("0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE", testToken1.address);
-    
-    const value = web3.utils.toWei('1', 'ether');
-    await testToken1.approve(orderBlock.address, web3.utils.toWei('2', 'ether'));
-    await orderBlock.createOrder(1, value, value, 0, 0, 0);
-    await orderBlock.createOrder(1, value, value, 0, 0, 0);
-   
-    await orderBlock.createOrder(1, value, web3.utils.toWei('2', 'ether'), 1, 2, 0, {value: web3.utils.toWei('2', 'ether')});
+    it("executes sell market order", async function() {
+        const amount = web3.utils.toWei("2");
+        const tokenBalanceBefore = await testToken1.balanceOf(owner.address);
 
-    let balance = await testToken1.balanceOf(owner.address);
-    console.log(web3.utils.fromWei(balance.toString()));
-  });
+        await orderBlock.createOrder(marketId, web3.utils.toWei("1.125"), amount, 1, 2, 0, {value: amount});
+        const actualPrice = await orderBlock.getPrice(marketId);
+        expect(actualPrice).to.equal(web3.utils.toWei("1"));
+
+        const tokenBalanceAfter = await testToken1.balanceOf(owner.address);
+        const expectedTokenAmount = web3.utils.toWei("1.333333333333333333");
+        expect(tokenBalanceBefore).to.equal(BigNumber.from(tokenBalanceAfter).sub(BigNumber.from(expectedTokenAmount)));
+    });
 });
