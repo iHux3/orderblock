@@ -148,9 +148,19 @@ contract OrderBlock is IOrderBlock, IComparing
         orderType typee = order.typee;
         require(typee == orderType.LIMIT || typee == orderType.STOP, "INVALID_TYPE");
 
-        //send tokens back
+        //remove order from market if it's on top
         uint64 marketId = order.marketId;
+        orderSide side = order.side;
         Market storage market = markets[marketId];
+        uint64[] storage marketOrders = side == orderSide.BUY ? 
+            (typee == orderType.STOP ? market.buyStopOrders : market.buyLimitOrders) : 
+            (typee == orderType.STOP ? market.sellStopOrders : market.sellLimitOrders);
+        uint64 top = marketOrders.getTop();
+        if (top == _orderId) {
+            marketOrders.removeTop();
+        }
+
+        //send tokens back
         address tokenAddress = order.side == orderSide.BUY ? market.quote : market.base;
         Utils.transfer(tokenAddress, address(this), msg.sender, order.amount);
 
