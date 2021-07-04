@@ -48,8 +48,8 @@ contract OrderBlock is IOrderBlock, IComparing
 
     uint64 freeOrderId = 1;
     uint64 freeMarketId = 1;
-    mapping(uint => Market) markets;
-    mapping(uint => Order) orders;
+    mapping(uint64 => Market) markets;
+    mapping(uint64 => Order) orders;
     mapping(address => User) users;
     mapping(uint256 => bool) pairs;
 
@@ -66,7 +66,7 @@ contract OrderBlock is IOrderBlock, IComparing
         require(_base != address(0));
 
         //check if exists
-        uint hashed = uint(keccak256(abi.encodePacked(_base, _quote)));
+        uint256 hashed = uint256(keccak256(abi.encodePacked(_base, _quote)));
         require(!pairs[hashed], "PAIR_EXISTS");
         pairs[hashed] = true;
 
@@ -282,14 +282,16 @@ contract OrderBlock is IOrderBlock, IComparing
         return orders[orderId].price;
     }
 
-    function getPairs() external override view returns(string[] memory bases, string[] memory quotes, address[] memory basesAddr, address[] memory quotesAddr)
+    function getPairs(uint64 page) external override view returns(string[] memory bases, string[] memory quotes, address[] memory basesAddr, address[] memory quotesAddr)
     {
-        uint _marketId = freeMarketId - 1;
-        bases = new string[](_marketId);
-        quotes = new string[](_marketId);
-        basesAddr = new address[](_marketId);
-        quotesAddr = new address[](_marketId);
-        for (uint i = 0; i < _marketId; i++) {
+        uint64 marketId = freeMarketId;
+        uint64 count = 100;
+        bases = new string[](count);
+        quotes = new string[](count);
+        basesAddr = new address[](count);
+        quotesAddr = new address[](count);
+        for (uint64 i = (page * count); i < (page * count + count); i++) {
+            if (i >= marketId) break;
             address base = markets[i + 1].base;
             address quote = markets[i + 1].quote;
             bases[i] = base == ETH ? "ETH" : IERC20Metadata(base).symbol();
@@ -301,8 +303,8 @@ contract OrderBlock is IOrderBlock, IComparing
 	
     function getPrice(uint64 _marketId) external override view returns (uint128) 
     {
-        uint nearestBuyLimit = getNearestLimitOrder(_marketId, orderSide.BUY);
-        uint nearestSellLimit = getNearestLimitOrder(_marketId, orderSide.SELL);
+        uint256 nearestBuyLimit = getNearestLimitOrder(_marketId, orderSide.BUY);
+        uint256 nearestSellLimit = getNearestLimitOrder(_marketId, orderSide.SELL);
         if (nearestBuyLimit == 0 || nearestSellLimit == 0) return 0;
         return ((nearestBuyLimit + nearestSellLimit) / 2).toUint128();
     }
@@ -323,7 +325,7 @@ contract OrderBlock is IOrderBlock, IComparing
     function _getOrders(uint64[] memory ids) private view returns (Order[] memory, uint64[] memory)
     {
         Order[] memory o = new Order[](ids.length);
-        for (uint i = 0; i < ids.length; i++) {
+        for (uint64 i = 0; i < ids.length; i++) {
             o[i] = orders[ids[i]];
         }
         return (o, ids);

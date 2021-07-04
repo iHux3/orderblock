@@ -38,7 +38,7 @@ interface IOrderBlock {
     function createMarket(address _base, address _quote) external;
     function createOrder(uint64 _marketId, uint128 _price, uint128 _amount, orderSide _side, orderType _type, uint128 _slippage) external payable;
     function cancelOrder(uint64 _orderId) external;
-    function getPairs() external view returns(string[] memory bases, string[] memory quotes, address[] memory basesAddr, address[] memory quotesAddr);
+    function getPairs(uint64 page) external view returns(string[] memory bases, string[] memory quotes, address[] memory basesAddr, address[] memory quotesAddr);
     function getPrice(uint64 _marketId) external view returns(uint128);
     function getMarketOrders(uint64 _marketId, orderSide _side, orderType _type) external view returns(Order[] memory, uint64[] memory);
     function getUserOrders(address _user) external view returns(Order[] memory, uint64[] memory);
