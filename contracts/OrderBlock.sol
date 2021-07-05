@@ -291,7 +291,7 @@ contract OrderBlock is IOrderBlock, IComparing
         basesAddr = new address[](count);
         quotesAddr = new address[](count);
         for (uint64 i = (page * count); i < (page * count + count); i++) {
-            if (i >= marketId) break;
+            if (i + 1 >= marketId) break;
             address base = markets[i + 1].base;
             address quote = markets[i + 1].quote;
             bases[i] = base == ETH ? "ETH" : IERC20Metadata(base).symbol();
