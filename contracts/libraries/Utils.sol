@@ -10,18 +10,12 @@ library Utils {
     using SafeCast for uint;
     using SafeERC20 for IERC20;
 
-    address constant ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
-
-    function transfer(address tokenAddress, address sender, address receiver, uint amount) external 
+    function transfer(IERC20 token, address sender, address receiver, uint amount) external 
     {
-        if (tokenAddress == ETH) {
-            payable(receiver).call{value: amount}("");
+        if (sender != msg.sender) {
+            token.safeTransfer(receiver, amount);
         } else {
-            if (sender != msg.sender) {
-                IERC20(tokenAddress).safeTransfer(receiver, amount);
-            } else {
-                IERC20(tokenAddress).safeTransferFrom(sender, receiver, amount);
-            }
+            token.safeTransferFrom(sender, receiver, amount);
         }
     }
 
@@ -33,12 +27,12 @@ library Utils {
         uint128 _slippage, 
         uint128 nearestBuyLimit,
         uint128 nearestSellLimit, 
-        address tokenAddress) external
+        IERC20 token,
+        uint8 baseDecimals) external
     {
         require(uint8(_type) < 3, "INVALID_TYPE");
 
         //verify price
-        require(_price >= 10 ** 9 && _price % 10 ** 9 == 0, "INVALID_PRICE");
         if (_type != IOrderBlock.orderType.MARKET) {
             if (_type == IOrderBlock.orderType.LIMIT) {
                 if (_side == IOrderBlock.orderSide.BUY) {
@@ -47,29 +41,38 @@ library Utils {
                     if (nearestBuyLimit != 0) require(_price > nearestBuyLimit, "PRICE < BEST BUY PRICE");
                 }
             } else {
-                uint price = (uint(nearestBuyLimit) + uint(nearestSellLimit)) / 2;
-                if (price > 0) {
+                uint128 actualPrice;
+                if (nearestBuyLimit != 0 && nearestSellLimit != 0) {
+                    actualPrice = ((uint(nearestBuyLimit) + uint(nearestSellLimit)) / 2).toUint128();
+                }
+
+                if (actualPrice > 0) {
                     if (_side == IOrderBlock.orderSide.BUY) {
-                        require(_price > price, "PRICE < ACTUAL PRICE");
+                        require(_price > actualPrice, "PRICE < ACTUAL PRICE");
                     } else {
-                        require(_price < price, "PRICE > ACTUAL PRICE");
+                        require(_price < actualPrice, "PRICE > ACTUAL PRICE");
                     }
                 }
             }
+
+            //verify that amount is convertable to the other asset
+            uint128 convertedAmount = convertOrderAmount(
+                _side == IOrderBlock.orderSide.BUY ? IOrderBlock.orderSide.SELL : IOrderBlock.orderSide.BUY, 
+                _amount, 
+                _price, 
+                baseDecimals
+            );
+            require(convertedAmount > 0, "INVALID_AMOUNT");
+        } else {
+            require(_price == 0, "INVALID_PRICE");
         }
 
         //verify amount
-        require(_amount >= 10 ** 9 && _amount % 10 ** 9 == 0, "INVALID_AMOUNT");
-        if (tokenAddress == ETH) {
-            require(msg.value == _amount, "GIVEN AMOUNT != ETH SENT");
-        } else {
-            IERC20 token = IERC20(tokenAddress);
-            require(token.balanceOf(msg.sender) >= _amount, 'NO_TOKEN_BALANCE');
-            require(token.allowance(msg.sender, address(this)) >= _amount, 'NO_TOKEN_ALLOWANCE');
+        require(token.balanceOf(msg.sender) >= _amount, 'NO_TOKEN_BALANCE');
+        require(token.allowance(msg.sender, address(this)) >= _amount, 'NO_TOKEN_ALLOWANCE');
 
-            if (_type != IOrderBlock.orderType.MARKET) {
-                token.safeTransferFrom(msg.sender, address(this), _amount);
-            }
+        if (_type != IOrderBlock.orderType.MARKET) {
+            token.safeTransferFrom(msg.sender, address(this), _amount);
         }
 
         //verify slippage
@@ -80,5 +83,11 @@ library Utils {
                 require(_side == IOrderBlock.orderSide.BUY ? _slippage > _price : _slippage < _price, "INVALID_SLIPPAGE");
             }
         }
+    }
+
+    function convertOrderAmount(IOrderBlock.orderSide _side, uint128 _amount, uint128 _price, uint8 baseDecimals) internal pure returns (uint128) {
+        return _side == IOrderBlock.orderSide.BUY ?
+            (uint(_amount) * uint(_price) / 10**baseDecimals).toUint128() :
+            (uint(_amount) * 10**baseDecimals / uint(_price)).toUint128();
     }
 }
