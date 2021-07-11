@@ -5,14 +5,14 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "./interfaces/IOrderBlock.sol";
-import "./interfaces/IComparing.sol";
 import "./libraries/Utils.sol";
-import "./libraries/Heap.sol";
+import "./libraries/PriorityList.sol";
+import "hardhat/console.sol";
 
-contract OrderBlock is IOrderBlock, IComparing
+contract OrderBlock is IOrderBlock
 {   
     using SafeCast for uint;
-    using Heap for uint64[];
+    using PriorityList for Data[];
 
     uint256 private unlocked = 1;
     modifier lock() {
@@ -22,36 +22,12 @@ contract OrderBlock is IOrderBlock, IComparing
         unlocked = 1;
     }
 
-    event OrderCreated (
-        uint64 marketId,
-        uint64 orderId,
-        uint128 price,
-        uint48 createdAt,
-        orderSide side,
-        orderType typee,
-        uint128 amount
-    );
-
-    event OrderChanged (
-        uint64 marketId,
-        uint64 orderId,
-        uint128 amount,
-        orderType typee
-    );
-
-    event OrderCanceled (
-        uint64 marketId,
-        uint64 orderId
-    );
-
     uint64 freeOrderId = 1;
     uint64 freeMarketId = 1;
     mapping(uint64 => Market) markets;
     mapping(uint64 => Order) orders;
     mapping(address => User) users;
     mapping(uint256 => bool) pairs;
-
-
 
     /**
     EXTERNAL FUNCTIONS
@@ -80,10 +56,10 @@ contract OrderBlock is IOrderBlock, IComparing
         freeMarketId++;
 
         //init heaps
-        markets[marketId].buyLimitOrders = Heap.init(64);
-        markets[marketId].sellLimitOrders = Heap.init(64);
-        markets[marketId].buyStopOrders = Heap.init(64);
-        markets[marketId].sellStopOrders = Heap.init(64);
+        markets[marketId].buyLimitOrders.init(64);
+        markets[marketId].sellLimitOrders.init(64);
+        markets[marketId].buyStopOrders.init(64);
+        markets[marketId].sellStopOrders.init(64);
     }
 
     function createOrder(
@@ -111,45 +87,51 @@ contract OrderBlock is IOrderBlock, IComparing
             token,
             IERC20Metadata(address(token)).decimals()
         );
-        uint64 _orderId = freeOrderId;
-
-        //interact with the market
         if (_type == orderType.MARKET) {
-            //market order
-            _marketOrder(_marketId, _amount, _side, _slippage, token);
-            //_executeStopOrders(data, marketOrders);
-
             _price = (uint(nearestBuyLimit + nearestSellLimit) / 2).toUint128();
-        } else {
-            //limit or stop order
-            uint64[] storage marketOrders = _side == orderSide.BUY ? 
-                (_type == orderType.STOP ? market.buyStopOrders : market.buyLimitOrders) : 
-                (_type == orderType.STOP ? market.sellStopOrders : market.sellLimitOrders);
-            marketOrders.add(freeOrderId);
-
-            //create order
-            orders[_orderId] = Order(
-                _marketId,
-                _price,
-                uint48(block.timestamp), 
-                _side, 
-                _type,
-                _amount,
-                _slippage,
-                msg.sender
-            );
-            users[msg.sender].orders.push(_orderId);
         }
         
+        uint64 _orderId = freeOrderId;
         freeOrderId++;
-        emit OrderCreated(
-            _marketId, 
-            _orderId, 
+        Order memory order = Order(
+            _marketId,
             _price,
             uint48(block.timestamp), 
             _side, 
             _type,
-            _amount
+            _amount,
+            _slippage,
+            msg.sender
+        );
+
+        //interact with the market
+        if (_type == orderType.MARKET) {
+            //market order
+            Data[] storage limitOrders = _side == orderSide.BUY ? 
+                markets[_marketId].sellLimitOrders : 
+                markets[_marketId].buyLimitOrders;
+            _marketOrder(order, limitOrders, token);
+
+        } else {
+            //limit or stop order
+            Data[] storage marketOrders = _side == orderSide.BUY ? 
+                (_type == orderType.STOP ? market.buyStopOrders : market.buyLimitOrders) : 
+                (_type == orderType.STOP ? market.sellStopOrders : market.sellLimitOrders);
+            marketOrders.insert(_orderId);
+
+            //create order
+            orders[_orderId] = order;
+            users[msg.sender].orders.push(_orderId);
+        }
+        
+        emit OrderCreated(
+            _marketId, 
+            _price,
+            _amount,
+            _side, 
+            _type,
+            _orderId, 
+            uint48(block.timestamp)
         );
     }
 	
@@ -166,12 +148,12 @@ contract OrderBlock is IOrderBlock, IComparing
         uint64 marketId = order.marketId;
         orderSide side = order.side;
         Market storage market = markets[marketId];
-        uint64[] storage marketOrders = side == orderSide.BUY ? 
+        Data[] storage marketOrders = side == orderSide.BUY ? 
             (typee == orderType.STOP ? market.buyStopOrders : market.buyLimitOrders) : 
             (typee == orderType.STOP ? market.sellStopOrders : market.sellLimitOrders);
-        uint64 top = marketOrders.getTop();
+        (uint64 top, ) = marketOrders.getFirst();
         if (top == _orderId) {
-            marketOrders.removeTop();
+            marketOrders.removeFirst();
         }
 
         //send tokens back
@@ -210,79 +192,99 @@ contract OrderBlock is IOrderBlock, IComparing
         }
     }
 
-    function _marketOrder(uint64 _marketId, uint128 _amount, orderSide _side, uint128 _slippage, IERC20 token) private
+    function _buildOrderQueue(Order memory marketOrder, Data[] storage limitOrders, uint8 baseDecimals) private returns (OrderQueue[] memory) 
     {
-        uint64[] storage marketOrders = _side == orderSide.BUY ? markets[_marketId].sellLimitOrders : markets[_marketId].buyLimitOrders;
-        IERC20 tokenOpposite = _side == orderSide.BUY ? markets[_marketId].base : markets[_marketId].quote;
-        uint128 remainingAmount = _amount;
-        uint8 baseDecimals = IERC20Metadata(address(token)).decimals();
+        OrderQueue[] memory orderQueue = new OrderQueue[](100);
 
-        while (remainingAmount > 0) {
-            //finding the best match
-            (uint64 bestOrderId, uint128 bestPrice) = _matchOrder(marketOrders, _side, _slippage);
+        uint i;
+        uint64 removeIndex;
+        (uint64 matchedOrderId, uint64 index) = limitOrders.getFirst();
+        require(matchedOrderId > 0, "NOT_FILLABLE_1");
 
-            Order storage matchedOrder = orders[bestOrderId];
-            uint128 orderAmount = matchedOrder.amount;
-            uint128 orderAmountConverted = Utils.convertOrderAmount(_side, orderAmount, bestPrice, baseDecimals);
+        while (marketOrder.amount > 0 && i < 100) {
+            uint128 orderPrice = orders[matchedOrderId].price;
+            if (marketOrder.slippage > 0) {
+                require(marketOrder.side == orderSide.BUY ? orderPrice <= marketOrder.slippage : orderPrice >= marketOrder.slippage, "PRICE_SLIPPAGE");
+            }
+            uint128 orderAmount = orders[matchedOrderId].amount;
+            uint128 orderAmountConverted = Utils.convertOrderAmount(marketOrder.side, orderAmount, orderPrice, baseDecimals);
+            uint128 amountIn;
+            uint128 amountOut;
 
-            if (orderAmountConverted > remainingAmount) {
-                //marketOrder creator sends
-                Utils.transfer(token, msg.sender, matchedOrder.creator, remainingAmount);
-                
-                //matched creator sends
-                uint128 amountToSend = Utils.convertOrderAmount(
-                    _side == orderSide.BUY ? orderSide.SELL : orderSide.BUY, 
-                    remainingAmount, 
-                    bestPrice, 
+            if (orderAmountConverted > marketOrder.amount) {
+                amountIn = marketOrder.amount;
+                amountOut = Utils.convertOrderAmount(
+                    marketOrder.side == orderSide.BUY ? orderSide.SELL : orderSide.BUY, 
+                    marketOrder.amount, 
+                    orderPrice, 
                     baseDecimals
                 );
-                Utils.transfer(tokenOpposite, address(this), msg.sender, amountToSend);
-
-                matchedOrder.amount -= amountToSend;
-                remainingAmount = 0;
-                emit OrderChanged(_marketId, bestOrderId, orderAmount - amountToSend, orderType.LIMIT);
+                require(amountOut > 0, "INVALID_AMOUNT");
+                marketOrder.amount = 0;
             } else {
-                //marketOrder creator sends
-                Utils.transfer(token, msg.sender, matchedOrder.creator, orderAmountConverted);
-
-                //matched creator sends
-                Utils.transfer(tokenOpposite, address(this), msg.sender, orderAmount);
-
-                remainingAmount -= orderAmountConverted;
-                matchedOrder.amount = 0;
-                matchedOrder.typee = orderType.EXECUTED;
-                marketOrders.removeTop();
-                emit OrderChanged(_marketId, bestOrderId, 0, orderType.EXECUTED);
+                amountIn = orderAmountConverted;
+                amountOut = orderAmount;
+                do {
+                    removeIndex = index;
+                    (matchedOrderId, index) = limitOrders.getByIndex(index);
+                    require(matchedOrderId > 0, "NOT_FILLABLE_2");
+                } while(orders[matchedOrderId].typee != orderType.LIMIT);
+                marketOrder.amount -= orderAmountConverted;
             }
-        }
-    }
+            orderAmount -= amountOut;
 
-    function _matchOrder(uint64[] storage marketOrders, orderSide _side, uint128 _slippage) private returns (uint64, uint128)
-    {
-        uint64 bestOrderId;
-        uint128 bestPrice;
-        uint64 maxIndex = marketOrders[0];
-        uint64 i = 1;
-        while (i < maxIndex) {
-            uint64 top = marketOrders.getTop();
-            if (orders[top].typee != orderType.CANCELED) {
-                bestPrice = orders[top].price;
-                if (_slippage > 0) {
-                    require(_side == orderSide.BUY ? bestPrice <= _slippage : bestPrice >= _slippage, "PRICE_SLIPPAGE");
-                }
-                bestOrderId = top;
-                break;
-            } else {
-                marketOrders.removeTop();
-                maxIndex--;
-            }
+            orderQueue[i] = OrderQueue(
+                matchedOrderId,
+                orderAmount == 0,
+                amountIn,
+                amountOut,
+                marketOrder.creator,
+                orders[matchedOrderId].creator
+            );
+
             i++;
         }
-        require(bestOrderId != 0, "NOT_ENOUGH_ORDERS");
-        return (bestOrderId, bestPrice);
+        
+        require(marketOrder.amount == 0, "NOT_FILLABLE_3");
+        if (removeIndex > 0) limitOrders.removeByIndex(removeIndex);
+        return orderQueue;
     }
 
+    function _marketOrder(Order memory marketOrder, Data[] storage limitOrders, IERC20 token) private
+    {
+        IERC20 tokenOpposite = marketOrder.side == orderSide.BUY ? 
+            markets[marketOrder.marketId].base : 
+            markets[marketOrder.marketId].quote;
+        uint8 baseDecimals = IERC20Metadata(address(token)).decimals();
+        OrderQueue[] memory orderQueue = _buildOrderQueue(marketOrder, limitOrders, baseDecimals);
 
+        for (uint256 i = 0; i < orderQueue.length; i++) {
+            uint64 orderId = orderQueue[i].orderId;
+            if (orderId == 0) break;
+
+            Utils.transfer(token, orderQueue[i].sender, orderQueue[i].creator, orderQueue[i].amountIn);
+            Utils.transfer(tokenOpposite, address(this), orderQueue[i].sender, orderQueue[i].amountOut);
+
+            if (orderQueue[i].filled) {
+                emit OrderChanged(
+                    marketOrder.marketId, 
+                    orderId, 
+                    0, 
+                    orderType.EXECUTED
+                );
+                orders[orderId].typee = orderType.EXECUTED;
+            } else {
+                uint128 amountLeft = orders[orderId].amount - orderQueue[i].amountOut;
+                emit OrderChanged(
+                    marketOrder.marketId, 
+                    orderId, 
+                    amountLeft,
+                    orderType.LIMIT
+                );
+                orders[orderId].amount = amountLeft;
+            }
+        }
+    }
 
     /**
     VIEW FUNCTIONS
@@ -291,8 +293,8 @@ contract OrderBlock is IOrderBlock, IComparing
     function getNearestLimitOrder(uint64 _marketId, orderSide _side) public view returns (uint128) 
     {
         Market storage market = markets[_marketId];
-        uint64[] storage marketOrders = _side == orderSide.BUY ? market.buyLimitOrders : market.sellLimitOrders;
-        uint64 orderId = marketOrders.getTop();
+        Data[] storage marketOrders = _side == orderSide.BUY ? market.buyLimitOrders : market.sellLimitOrders;
+        (uint64 orderId, ) = marketOrders.getFirst();
         return orders[orderId].price;
     }
 
@@ -323,12 +325,14 @@ contract OrderBlock is IOrderBlock, IComparing
         return ((nearestBuyLimit + nearestSellLimit) / 2).toUint128();
     }
 
+    //needs to be paginated too
     function getMarketOrders(uint64 _marketId, orderSide _side, orderType _type) external override view returns (Order[] memory, uint64[] memory) 
     {
         Market storage market = markets[_marketId];
-        return _getOrders(_side == orderSide.BUY ? 
+        Data[] storage marketOrders = _side == orderSide.BUY ? 
             (_type == orderType.LIMIT ? market.buyLimitOrders : market.buyStopOrders) :
-            (_type == orderType.LIMIT ? market.sellLimitOrders : market.sellStopOrders));
+            (_type == orderType.LIMIT ? market.sellLimitOrders : market.sellStopOrders);
+        return _getOrders(marketOrders.getAllValues());
     }
 
     function getUserOrders(address _user) external override view returns (Order[] memory, uint64[] memory) 

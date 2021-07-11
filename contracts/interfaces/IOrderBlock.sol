@@ -2,8 +2,9 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "./IPriorityList.sol";
 
-interface IOrderBlock {
+interface IOrderBlock is IPriorityList {
     enum orderType {
         LIMIT, STOP, MARKET, EXECUTED, CANCELED, FAILED
     }
@@ -19,10 +20,10 @@ interface IOrderBlock {
     struct Market {
         IERC20 base;
         IERC20 quote;
-        uint64[] buyLimitOrders;
-        uint64[] sellLimitOrders;
-        uint64[] buyStopOrders;
-        uint64[] sellStopOrders;
+        Data[] buyLimitOrders;
+        Data[] sellLimitOrders;
+        Data[] buyStopOrders;
+        Data[] sellStopOrders;
     }
 
     struct Order {
@@ -35,6 +36,37 @@ interface IOrderBlock {
         uint128 slippage;
         address creator;
     }
+
+    struct OrderQueue {
+        uint64 orderId;
+        bool filled;
+        uint128 amountIn;
+        uint128 amountOut;
+        address sender;
+        address creator;
+    }
+
+    event OrderCreated (
+        uint64 marketId,
+        uint128 price,
+        uint128 amount,
+        orderSide side,
+        orderType typee,
+        uint64 orderId,
+        uint48 createdAt
+    );
+
+    event OrderChanged (
+        uint64 marketId,
+        uint64 orderId,
+        uint128 amount,
+        orderType typee
+    );
+
+    event OrderCanceled (
+        uint64 marketId,
+        uint64 orderId
+    );
 
     function createMarket(IERC20 _base, IERC20 _quote) external;
     function createOrder(uint64 _marketId, uint128 _price, uint128 _amount, orderSide _side, orderType _type, uint128 _slippage) external payable;
