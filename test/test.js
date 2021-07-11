@@ -92,9 +92,9 @@ describe("OrderBlock contract", function() {
 
         const amountBuy = web3.utils.toWei("55");
         await tokenQuote.approve(orderBlock.address, amountBuy);
-        await orderBlock.createOrder(marketId, 0, amount, 0, 2, 0);
+        await orderBlock.createOrder(marketId, 0, amountBuy, 0, 2, 0);
 
         const actualPrice = await orderBlock.getPrice(marketId);
         expect(actualPrice).to.equal(web3.utils.toWei("1"));
-    })
+    });
 });

@@ -7,7 +7,6 @@ import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "./interfaces/IOrderBlock.sol";
 import "./libraries/Utils.sol";
 import "./libraries/PriorityList.sol";
-import "hardhat/console.sol";
 
 contract OrderBlock is IOrderBlock
 {   
@@ -55,7 +54,7 @@ contract OrderBlock is IOrderBlock
         markets[marketId].quote = _quote;
         freeMarketId++;
 
-        //init heaps
+        //init priority lists
         markets[marketId].buyLimitOrders.init(64);
         markets[marketId].sellLimitOrders.init(64);
         markets[marketId].buyStopOrders.init(64);
@@ -117,11 +116,11 @@ contract OrderBlock is IOrderBlock
             Data[] storage marketOrders = _side == orderSide.BUY ? 
                 (_type == orderType.STOP ? market.buyStopOrders : market.buyLimitOrders) : 
                 (_type == orderType.STOP ? market.sellStopOrders : market.sellLimitOrders);
-            marketOrders.insert(_orderId);
 
             //create order
             orders[_orderId] = order;
             users[msg.sender].orders.push(_orderId);
+            marketOrders.insert(_orderId);
         }
         
         emit OrderCreated(
@@ -171,7 +170,7 @@ contract OrderBlock is IOrderBlock
     INTERNAL IMPLEMENTATION
     */
 
-    //heap calls this function to compare prices
+    //priority list calls this function to compare prices
     function compare(uint64 orderId1, uint64 orderId2) external view override returns (bool) 
     {
         orderSide side = orders[orderId1].side;
@@ -184,7 +183,7 @@ contract OrderBlock is IOrderBlock
         if (price1 == price2) {
             uint48 createdAt1 = orders[orderId1].createdAt;
             uint48 createdAt2 = orders[orderId2].createdAt;
-            return createdAt2 > createdAt1;
+            return createdAt2 >= createdAt1;
         } else {
             return typee == orderType.LIMIT ?
                 (side == orderSide.BUY ? price1 > price2 : price1 < price2) :
@@ -224,12 +223,14 @@ contract OrderBlock is IOrderBlock
             } else {
                 amountIn = orderAmountConverted;
                 amountOut = orderAmount;
+                marketOrder.amount -= orderAmountConverted;
                 do {
                     removeIndex = index;
                     (matchedOrderId, index) = limitOrders.getByIndex(index);
-                    require(matchedOrderId > 0, "NOT_FILLABLE_2");
+                    if (marketOrder.amount > 0) {
+                        require(matchedOrderId > 0, "NOT_FILLABLE_2");
+                    }
                 } while(orders[matchedOrderId].typee != orderType.LIMIT);
-                marketOrder.amount -= orderAmountConverted;
             }
             orderAmount -= amountOut;
 
