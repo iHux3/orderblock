@@ -13,6 +13,8 @@ contract OrderBlock is IOrderBlock
     using SafeCast for uint;
     using PriorityList for Data[];
 
+    uint256 MAX_ORDERS_QUEUE = 100;
+
     uint256 private unlocked = 1;
     modifier lock() {
         require(unlocked == 1, "LOCKED");
@@ -21,16 +23,16 @@ contract OrderBlock is IOrderBlock
         unlocked = 1;
     }
 
-    uint64 freeOrderId = 1;
-    uint64 freeMarketId = 1;
-    mapping(uint64 => Market) markets;
-    mapping(uint64 => Order) orders;
+    uint64 public freeOrderId = 1;
+    uint64 public freeMarketId = 1;
+    mapping(uint64 => Market) public markets;
+    mapping(uint64 => Order) public orders;
     mapping(address => User) users;
     mapping(uint256 => bool) pairs;
 
-    /**
-    EXTERNAL FUNCTIONS
-    */
+    ////////////////////////////////////////
+    //EXTERNAL FUNCTIONS
+    ////////////////////////////////////////
 
     function createMarket(IERC20 _base, IERC20 _quote) external override
     {
@@ -86,11 +88,8 @@ contract OrderBlock is IOrderBlock
             token,
             IERC20Metadata(address(token)).decimals()
         );
-        if (_type == orderType.MARKET) {
-            _price = (uint(nearestBuyLimit + nearestSellLimit) / 2).toUint128();
-        }
         
-        uint64 _orderId = freeOrderId;
+        uint64 orderId = freeOrderId;
         freeOrderId++;
         Order memory order = Order(
             _marketId,
@@ -100,7 +99,8 @@ contract OrderBlock is IOrderBlock
             _type,
             _amount,
             _slippage,
-            msg.sender
+            msg.sender,
+            orderId
         );
 
         //interact with the market
@@ -118,9 +118,9 @@ contract OrderBlock is IOrderBlock
                 (_type == orderType.STOP ? market.sellStopOrders : market.sellLimitOrders);
 
             //create order
-            orders[_orderId] = order;
-            users[msg.sender].orders.push(_orderId);
-            marketOrders.insert(_orderId);
+            orders[orderId] = order;
+            users[msg.sender].orders.push(orderId);
+            marketOrders.insert(orderId);
         }
         
         emit OrderCreated(
@@ -129,7 +129,7 @@ contract OrderBlock is IOrderBlock
             _amount,
             _side, 
             _type,
-            _orderId, 
+            orderId, 
             uint48(block.timestamp)
         );
     }
@@ -166,9 +166,9 @@ contract OrderBlock is IOrderBlock
 
 
 
-    /**
-    INTERNAL IMPLEMENTATION
-    */
+    ////////////////////////////////////////
+    //INTERNAL IMPLEMENTATION
+    ////////////////////////////////////////
 
     //priority list calls this function to compare prices
     function compare(uint64 orderId1, uint64 orderId2) external view override returns (bool) 
@@ -191,16 +191,23 @@ contract OrderBlock is IOrderBlock
         }
     }
 
-    function _buildOrderQueue(Order memory marketOrder, Data[] storage limitOrders, uint8 baseDecimals) private returns (OrderQueue[] memory) 
+    function _buildOrderQueue(
+        uint8 startIndex, 
+        Order memory marketOrder, 
+        Data[] storage limitOrders,
+        uint8 baseDecimals,  
+        OrderQueue[] memory orderQueue) private returns (uint8 i) 
     {
-        OrderQueue[] memory orderQueue = new OrderQueue[](100);
-
-        uint i;
+        i = startIndex;
         uint64 removeIndex;
         (uint64 matchedOrderId, uint64 index) = limitOrders.getFirst();
-        require(matchedOrderId > 0, "NOT_FILLABLE_1");
+        if (matchedOrderId == 0) {
+            //not fillable
+            orderQueue[startIndex].orderId = 0;
+            return 0;
+        }
 
-        while (marketOrder.amount > 0 && i < 100) {
+        while (marketOrder.amount > 0 && i < MAX_ORDERS_QUEUE) {
             uint128 orderPrice = orders[matchedOrderId].price;
             if (marketOrder.slippage > 0) {
                 require(marketOrder.side == orderSide.BUY ? orderPrice <= marketOrder.slippage : orderPrice >= marketOrder.slippage, "PRICE_SLIPPAGE");
@@ -220,6 +227,7 @@ contract OrderBlock is IOrderBlock
                 );
                 require(amountOut > 0, "INVALID_AMOUNT");
                 marketOrder.amount = 0;
+                orders[matchedOrderId].amount -= amountOut;
             } else {
                 amountIn = orderAmountConverted;
                 amountOut = orderAmount;
@@ -228,42 +236,139 @@ contract OrderBlock is IOrderBlock
                     removeIndex = index;
                     (matchedOrderId, index) = limitOrders.getByIndex(index);
                     if (marketOrder.amount > 0) {
-                        require(matchedOrderId > 0, "NOT_FILLABLE_2");
+                        if (matchedOrderId == 0) {
+                            //not fillable
+                            orderQueue[startIndex].orderId = 0;
+                            return 0;
+                        }
                     }
-                } while(orders[matchedOrderId].typee != orderType.LIMIT);
+                } while (orders[matchedOrderId].typee != orderType.LIMIT);
             }
             orderAmount -= amountOut;
 
             orderQueue[i] = OrderQueue(
                 matchedOrderId,
+                marketOrder.typee == orderType.STOP,
                 orderAmount == 0,
-                amountIn,
-                amountOut,
                 marketOrder.creator,
-                orders[matchedOrderId].creator
+                orders[matchedOrderId].creator,
+                amountIn,
+                amountOut
             );
 
             i++;
         }
         
-        require(marketOrder.amount == 0, "NOT_FILLABLE_3");
+        if (marketOrder.amount != 0) {
+            //not fillable
+            orderQueue[startIndex].orderId = 0;
+            return 0;
+        }
         if (removeIndex > 0) limitOrders.removeByIndex(removeIndex);
-        return orderQueue;
+        return i;
+    }
+
+    function _getExecutableStopOrder(
+        Order memory order, 
+        Data[] storage stopOrders, 
+        uint64 stopOrderIndex,
+        uint128 bestLimitPrice,
+        uint128 bestOppositeLimitPrice) private view returns (uint64, bool) 
+    {
+        uint128 actualPrice;
+        if (bestLimitPrice == 0 || bestOppositeLimitPrice == 0) {
+            actualPrice = 0;
+        } else {
+            actualPrice = ((uint(bestLimitPrice) + uint(bestOppositeLimitPrice)) / 2).toUint128();
+        }
+        
+        uint64 index = stopOrderIndex;
+        uint64 stopOrderId;
+        uint64 removeIndex;
+
+        do {
+            removeIndex = index;
+            (stopOrderId, index) = stopOrders.getByIndex(stopOrderIndex);
+            if (stopOrderId == 0) {
+                return (removeIndex, true);
+            }
+        } while (orders[stopOrderId].typee != orderType.STOP);
+        stopOrderIndex = index;
+        
+        uint128 orderPrice = orders[stopOrderId].price;
+        bool executable = order.side == orderSide.BUY ?
+            actualPrice > orderPrice : actualPrice < orderPrice;
+
+        if (executable) {
+            Order storage stopOrder = orders[stopOrderId];
+            order.orderId = stopOrderId;
+            order.slippage = stopOrder.slippage;
+            order.amount = stopOrder.amount;
+            order.creator = stopOrder.creator;
+            order.typee = orderType.STOP;
+            return (stopOrderIndex, false);
+        } else {
+            return (removeIndex, true);
+        }
+    }
+
+    function _stopOrderFailed(Order memory order, IERC20 token) private {
+        uint64 orderId = order.orderId;
+        Utils.transfer(token, address(this), order.creator, order.amount);
+        orders[orderId].typee = orderType.FAILED;
+        emit OrderChanged(order.marketId, orderId, 0, orderType.FAILED);
     }
 
     function _marketOrder(Order memory marketOrder, Data[] storage limitOrders, IERC20 token) private
     {
+        uint8 baseDecimals = IERC20Metadata(address(token)).decimals();
+
+        OrderQueue[] memory orderQueue = new OrderQueue[](MAX_ORDERS_QUEUE);
+        uint8 queueIndex = _buildOrderQueue(0, marketOrder, limitOrders, baseDecimals, orderQueue);
+        require(queueIndex > 0, "NOT_FILLABLE");
+        uint128 bestLimitPrice = orders[orderQueue[queueIndex - 1].orderId].price;
+        uint128 bestOppositeLimitPrice = marketOrder.side == orderSide.BUY ? 
+            getNearestLimitOrder(marketOrder.marketId, orderSide.BUY) :
+            getNearestLimitOrder(marketOrder.marketId, orderSide.SELL);
+        
+        //deal with stop orders
+        Data[] storage stopOrders = marketOrder.side == orderSide.BUY ? 
+            markets[marketOrder.marketId].buyStopOrders :
+            markets[marketOrder.marketId].sellStopOrders;
+        uint64 stopOrderIndex;
+        bool remove;
+
+        while (true) {
+            (stopOrderIndex, remove) = _getExecutableStopOrder(marketOrder, stopOrders, stopOrderIndex, bestLimitPrice, bestOppositeLimitPrice);
+            if (remove) break;
+
+            if (queueIndex != 0) {
+                queueIndex = _buildOrderQueue(queueIndex, marketOrder, limitOrders, baseDecimals, orderQueue);
+            }
+
+            if (queueIndex == 0) {
+                _stopOrderFailed(marketOrder, token);
+            } else {
+                bestLimitPrice = orders[orderQueue[queueIndex - 1].orderId].price;
+            }
+        }
+        if (stopOrderIndex != 0) {
+            stopOrders.removeByIndex(stopOrderIndex);
+        }
+
+        _executeOrderQueue(marketOrder, orderQueue, token);
+    }
+
+    function _executeOrderQueue(Order memory marketOrder, OrderQueue[] memory orderQueue, IERC20 token) private {
         IERC20 tokenOpposite = marketOrder.side == orderSide.BUY ? 
             markets[marketOrder.marketId].base : 
             markets[marketOrder.marketId].quote;
-        uint8 baseDecimals = IERC20Metadata(address(token)).decimals();
-        OrderQueue[] memory orderQueue = _buildOrderQueue(marketOrder, limitOrders, baseDecimals);
 
         for (uint256 i = 0; i < orderQueue.length; i++) {
             uint64 orderId = orderQueue[i].orderId;
             if (orderId == 0) break;
 
-            Utils.transfer(token, orderQueue[i].sender, orderQueue[i].creator, orderQueue[i].amountIn);
+            Utils.transfer(token, orderQueue[i].stopOrder ? address(this) : msg.sender, orderQueue[i].creator, orderQueue[i].amountIn);
             Utils.transfer(tokenOpposite, address(this), orderQueue[i].sender, orderQueue[i].amountOut);
 
             if (orderQueue[i].filled) {
@@ -287,9 +392,9 @@ contract OrderBlock is IOrderBlock
         }
     }
 
-    /**
-    VIEW FUNCTIONS
-    */
+    ////////////////////////////////////////
+    //VIEW FUNCTIONS
+    ////////////////////////////////////////
 
     function getNearestLimitOrder(uint64 _marketId, orderSide _side) public view returns (uint128) 
     {
@@ -297,6 +402,14 @@ contract OrderBlock is IOrderBlock
         Data[] storage marketOrders = _side == orderSide.BUY ? market.buyLimitOrders : market.sellLimitOrders;
         (uint64 orderId, ) = marketOrders.getFirst();
         return orders[orderId].price;
+    }
+	
+    function getPrice(uint64 _marketId) public override view returns (uint128) 
+    {
+        uint256 nearestBuyLimit = getNearestLimitOrder(_marketId, orderSide.BUY);
+        uint256 nearestSellLimit = getNearestLimitOrder(_marketId, orderSide.SELL);
+        if (nearestBuyLimit == 0 || nearestSellLimit == 0) return 0;
+        return ((nearestBuyLimit + nearestSellLimit) / 2).toUint128();
     }
 
     function getPairs(uint64 page) external override view returns(string[] memory bases, string[] memory quotes, IERC20[] memory basesAddr, IERC20[] memory quotesAddr)
@@ -316,14 +429,6 @@ contract OrderBlock is IOrderBlock
             basesAddr[i] = base;
             quotesAddr[i] = quote;
         }
-    }
-	
-    function getPrice(uint64 _marketId) external override view returns (uint128) 
-    {
-        uint256 nearestBuyLimit = getNearestLimitOrder(_marketId, orderSide.BUY);
-        uint256 nearestSellLimit = getNearestLimitOrder(_marketId, orderSide.SELL);
-        if (nearestBuyLimit == 0 || nearestSellLimit == 0) return 0;
-        return ((nearestBuyLimit + nearestSellLimit) / 2).toUint128();
     }
 
     //needs to be paginated too

@@ -35,15 +35,17 @@ interface IOrderBlock is IPriorityList {
         uint128 amount;
         uint128 slippage;
         address creator;
+        uint64 orderId;
     }
 
     struct OrderQueue {
         uint64 orderId;
+        bool stopOrder;
         bool filled;
-        uint128 amountIn;
-        uint128 amountOut;
         address sender;
         address creator;
+        uint128 amountIn;
+        uint128 amountOut;
     }
 
     event OrderCreated (
