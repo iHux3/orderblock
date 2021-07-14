@@ -415,12 +415,21 @@ contract OrderBlock is IOrderBlock
     function getPairs(uint64 page) external override view returns(string[] memory bases, string[] memory quotes, IERC20[] memory basesAddr, IERC20[] memory quotesAddr)
     {
         uint64 marketId = freeMarketId;
-        uint64 count = 100;
+        uint64 maxCount = 100;
+        uint64 maxPage = (marketId - 1) / maxCount;
+        require(page <= maxPage, "INVALID_PAGE");
+        uint64 count;
+        if (page == maxPage) {
+            count = (marketId - 1) % maxCount;
+        } else {
+            count = maxCount;
+        }
+
         bases = new string[](count);
         quotes = new string[](count);
         basesAddr = new IERC20[](count);
         quotesAddr = new IERC20[](count);
-        for (uint64 i = (page * count); i < (page * count + count); i++) {
+        for (uint64 i = (page * maxCount); i < (page * maxCount + count); i++) {
             if (i + 1 >= marketId) break;
             IERC20 base = markets[i + 1].base;
             IERC20 quote = markets[i + 1].quote;
