@@ -71,7 +71,7 @@ interface IOrderBlock is IPriorityList {
     );
 
     function createMarket(IERC20 _base, IERC20 _quote) external;
-    function createOrder(uint64 _marketId, uint128 _price, uint128 _amount, orderSide _side, orderType _type, uint128 _slippage) external payable;
+    function createOrder(uint64 _marketId, uint128 _price, uint128 _amount, orderSide _side, orderType _type, uint128 _slippage) external;
     function cancelOrder(uint64 _orderId) external;
     function getPairs(uint64 page) external view returns(string[] memory bases, string[] memory quotes, IERC20[] memory basesAddr, IERC20[] memory quotesAddr);
     function getPrice(uint64 _marketId) external view returns(uint128);
