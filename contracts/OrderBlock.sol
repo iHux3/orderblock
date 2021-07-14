@@ -69,7 +69,7 @@ contract OrderBlock is IOrderBlock
         uint128 _amount, 
         orderSide _side, 
         orderType _type, 
-        uint128 _slippage) external override payable lock
+        uint128 _slippage) external override lock
     {
         //verify user input
         Market storage market = markets[_marketId];
