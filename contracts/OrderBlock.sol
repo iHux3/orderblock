@@ -130,7 +130,8 @@ contract OrderBlock is IOrderBlock
             _side, 
             _type,
             orderId, 
-            uint48(block.timestamp)
+            uint48(block.timestamp),
+            msg.sender
         );
     }
 	
@@ -380,7 +381,7 @@ contract OrderBlock is IOrderBlock
                 );
                 orders[orderId].typee = orderType.EXECUTED;
             } else {
-                uint128 amountLeft = orders[orderId].amount - orderQueue[i].amountOut;
+                uint128 amountLeft = orders[orderId].amount;
                 emit OrderChanged(
                     marketOrder.marketId, 
                     orderId, 

@@ -55,7 +55,8 @@ interface IOrderBlock is IPriorityList {
         orderSide side,
         orderType typee,
         uint64 orderId,
-        uint48 createdAt
+        uint48 createdAt,
+        address creator
     );
 
     event OrderChanged (
