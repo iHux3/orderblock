@@ -80,6 +80,10 @@ library Utils {
             require(_slippage == 0, "INVALID_SLIPPAGE");
         } else {
             if (_slippage > 0) {
+                if (_type == IOrderBlock.orderType.MARKET && nearestBuyLimit != 0 && nearestSellLimit != 0) {
+                    _price = ((uint(nearestBuyLimit) + uint(nearestSellLimit)) / 2).toUint128();
+                }
+
                 require(_side == IOrderBlock.orderSide.BUY ? _slippage > _price : _slippage < _price, "INVALID_SLIPPAGE");
             }
         }
