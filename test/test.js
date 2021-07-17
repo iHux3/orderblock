@@ -96,7 +96,7 @@ describe("OrderBlock contract", function() {
         expect(tokenBalanceBefore).to.equal(BigNumber.from(tokenBalanceAfter).sub(BigNumber.from(expectedTokenAmount)));
     });
 
-    it("places 50 sell limit orders and executes buy market order that executes these limit orders", async function() {
+    /*it("places 50 sell limit orders and executes buy market order that executes these limit orders", async function() {
         const amount = web3.utils.toWei("1");
         const amountTotal = web3.utils.toWei("50");
         await tokenBase.approve(orderBlock.address, amountTotal);
@@ -111,7 +111,7 @@ describe("OrderBlock contract", function() {
 
         const actualPrice = await orderBlock.getPrice(marketId);
         expect(actualPrice).to.equal(web3.utils.toWei("1"));
-    });
+    });*/
 
     it("executes buy market order and triggers 2 buy stop orders", async function () {
         const amount = web3.utils.toWei("1.5");
@@ -119,11 +119,18 @@ describe("OrderBlock contract", function() {
 
         await orderBlock.createOrder(marketId, 0, amount, 0, 2, 0);
 
+        const orderInfo4 = await orderBlock.orders(4);
+        const orderInfo5 = await orderBlock.orders(5);
+        const orderInfo7 = await orderBlock.orders(7);
+        const orderInfo8 = await orderBlock.orders(8);
+        const orderInfo9 = await orderBlock.orders(notFillableId);
+        expect(orderInfo4.typee).to.equal(3);
+        expect(orderInfo5.typee).to.equal(3);
+        expect(orderInfo7.typee).to.equal(3);
+        expect(orderInfo8.typee).to.equal(3);
+        expect(orderInfo9.typee).to.equal(5);
+
         const actualPrice = await orderBlock.getPrice(marketId);
         expect(actualPrice).to.equal(web3.utils.toWei("2.25"));
-
-        // one stop order failed
-        const orderInfo = await orderBlock.orders(notFillableId);
-        expect(orderInfo.typee).to.equal(5);
     });
 });

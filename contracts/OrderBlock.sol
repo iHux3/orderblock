@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "./interfaces/IOrderBlock.sol";
 import "./libraries/Utils.sol";
 import "./libraries/PriorityList.sol";
+import "hardhat/console.sol";
 
 contract OrderBlock is IOrderBlock
 {   
@@ -232,18 +233,6 @@ contract OrderBlock is IOrderBlock
             } else {
                 amountIn = orderAmountConverted;
                 amountOut = orderAmount;
-                marketOrder.amount -= orderAmountConverted;
-                do {
-                    removeIndex = index;
-                    (matchedOrderId, index) = limitOrders.getByIndex(index);
-                    if (marketOrder.amount > 0) {
-                        if (matchedOrderId == 0) {
-                            //not fillable
-                            orderQueue[startIndex].orderId = 0;
-                            return 0;
-                        }
-                    }
-                } while (orders[matchedOrderId].typee != orderType.LIMIT);
             }
             orderAmount -= amountOut;
 
@@ -257,6 +246,20 @@ contract OrderBlock is IOrderBlock
                 amountOut
             );
 
+            if (orderAmountConverted <= marketOrder.amount) {
+                marketOrder.amount -= orderAmountConverted;
+                do {
+                    removeIndex = index;
+                    (matchedOrderId, index) = limitOrders.getByIndex(index);
+                    if (marketOrder.amount > 0) {
+                        if (matchedOrderId == 0) {
+                            //not fillable
+                            orderQueue[startIndex].orderId = 0;
+                            return 0;
+                        }
+                    }
+                } while (orders[matchedOrderId].typee != orderType.LIMIT);
+            }
             i++;
         }
         
@@ -269,57 +272,6 @@ contract OrderBlock is IOrderBlock
         return i;
     }
 
-    function _getExecutableStopOrder(
-        Order memory order, 
-        Data[] storage stopOrders, 
-        uint64 stopOrderIndex,
-        uint128 bestLimitPrice,
-        uint128 bestOppositeLimitPrice) private view returns (uint64, bool) 
-    {
-        uint128 actualPrice;
-        if (bestLimitPrice == 0 || bestOppositeLimitPrice == 0) {
-            actualPrice = 0;
-        } else {
-            actualPrice = ((uint(bestLimitPrice) + uint(bestOppositeLimitPrice)) / 2).toUint128();
-        }
-        
-        uint64 index = stopOrderIndex;
-        uint64 stopOrderId;
-        uint64 removeIndex;
-
-        do {
-            removeIndex = index;
-            (stopOrderId, index) = stopOrders.getByIndex(stopOrderIndex);
-            if (stopOrderId == 0) {
-                return (removeIndex, true);
-            }
-        } while (orders[stopOrderId].typee != orderType.STOP);
-        stopOrderIndex = index;
-        
-        uint128 orderPrice = orders[stopOrderId].price;
-        bool executable = order.side == orderSide.BUY ?
-            actualPrice > orderPrice : actualPrice < orderPrice;
-
-        if (executable) {
-            Order storage stopOrder = orders[stopOrderId];
-            order.orderId = stopOrderId;
-            order.slippage = stopOrder.slippage;
-            order.amount = stopOrder.amount;
-            order.creator = stopOrder.creator;
-            order.typee = orderType.STOP;
-            return (stopOrderIndex, false);
-        } else {
-            return (removeIndex, true);
-        }
-    }
-
-    function _stopOrderFailed(Order memory order, IERC20 token) private {
-        uint64 orderId = order.orderId;
-        Utils.transfer(token, address(this), order.creator, order.amount);
-        orders[orderId].typee = orderType.FAILED;
-        emit OrderChanged(order.marketId, orderId, 0, orderType.FAILED);
-    }
-
     function _marketOrder(Order memory marketOrder, Data[] storage limitOrders, IERC20 token) private
     {
         uint8 baseDecimals = IERC20Metadata(address(token)).decimals();
@@ -327,7 +279,9 @@ contract OrderBlock is IOrderBlock
         OrderQueue[] memory orderQueue = new OrderQueue[](MAX_ORDERS_QUEUE);
         uint8 queueIndex = _buildOrderQueue(0, marketOrder, limitOrders, baseDecimals, orderQueue);
         require(queueIndex > 0, "NOT_FILLABLE");
-        uint128 bestLimitPrice = orders[orderQueue[queueIndex - 1].orderId].price;
+
+        (uint64 bestOrderId, ) = limitOrders.getFirst();
+        uint128 bestLimitPrice = orders[bestOrderId].price;
         uint128 bestOppositeLimitPrice = marketOrder.side == orderSide.BUY ? 
             getNearestLimitOrder(marketOrder.marketId, orderSide.BUY) :
             getNearestLimitOrder(marketOrder.marketId, orderSide.SELL);
@@ -350,7 +304,8 @@ contract OrderBlock is IOrderBlock
             if (queueIndex == 0) {
                 _stopOrderFailed(marketOrder, token);
             } else {
-                bestLimitPrice = orders[orderQueue[queueIndex - 1].orderId].price;
+                (bestOrderId, ) = limitOrders.getFirst();
+                bestLimitPrice = orders[bestOrderId].price;
             }
         }
         if (stopOrderIndex != 0) {
@@ -391,6 +346,58 @@ contract OrderBlock is IOrderBlock
                 orders[orderId].amount = amountLeft;
             }
         }
+    }
+
+    function _getExecutableStopOrder(
+        Order memory order, 
+        Data[] storage stopOrders, 
+        uint64 stopOrderIndex,
+        uint128 bestLimitPrice,
+        uint128 bestOppositeLimitPrice) private returns (uint64, bool) 
+    {
+        uint128 actualPrice;
+        if (bestLimitPrice == 0 || bestOppositeLimitPrice == 0) {
+            actualPrice = 0;
+        } else {
+            actualPrice = ((uint(bestLimitPrice) + uint(bestOppositeLimitPrice)) / 2).toUint128();
+        }
+        
+        uint64 index = stopOrderIndex;
+        uint64 stopOrderId;
+        uint64 removeIndex;
+
+        do {
+            removeIndex = index;
+            (stopOrderId, index) = stopOrders.getByIndex(stopOrderIndex);
+            if (stopOrderId == 0) {
+                return (removeIndex, true);
+            }
+        } while (orders[stopOrderId].typee != orderType.STOP);
+        stopOrderIndex = index;
+        
+        uint128 orderPrice = orders[stopOrderId].price;
+        bool executable = order.side == orderSide.BUY ?
+            actualPrice > orderPrice : actualPrice < orderPrice;
+
+        if (executable) {
+            Order storage stopOrder = orders[stopOrderId];
+            order.orderId = stopOrderId;
+            order.slippage = stopOrder.slippage;
+            order.amount = stopOrder.amount;
+            order.creator = stopOrder.creator;
+            order.typee = orderType.STOP;
+            stopOrder.typee = orderType.EXECUTED;
+            return (stopOrderIndex, false);
+        } else {
+            return (removeIndex, true);
+        }
+    }
+
+    function _stopOrderFailed(Order memory order, IERC20 token) private {
+        uint64 orderId = order.orderId;
+        Utils.transfer(token, address(this), order.creator, order.amount);
+        orders[orderId].typee = orderType.FAILED;
+        emit OrderChanged(order.marketId, orderId, 0, orderType.FAILED);
     }
 
     ////////////////////////////////////////
